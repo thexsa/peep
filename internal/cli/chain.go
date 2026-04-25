@@ -65,8 +65,7 @@ func runChain(cmd *cobra.Command, args []string) error {
 
 	// Cert details: Leaf → Intermediate → Root
 	for _, cert := range chain.Certificates {
-		fmt.Println(ui.RenderCertCard(cert))
-		fmt.Println()
+		fmt.Print(ui.RenderCertCard(cert))
 	}
 
 	// Chain diagram

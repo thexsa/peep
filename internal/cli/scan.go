@@ -113,8 +113,7 @@ func runScan(cmd *cobra.Command, args []string) error {
 
 	// Cert cards
 	for _, cert := range chain.Certificates {
-		fmt.Println(ui.RenderCertCard(cert))
-		fmt.Println()
+		fmt.Print(ui.RenderCertCard(cert))
 	}
 
 	// Overall
