@@ -137,7 +137,7 @@ func topicChain() Topic {
 🔗 Chain of Trust
 ━━━━━━━━━━━━━━━━━━━
 
-The chain of trust is how a browser decides to trust a certificate:
+The chain of trust is how a browser or other application decides to trust a certificate:
 
   🏛️  Root CA (DigiCert)         ← Already in your trust store
    │
@@ -146,7 +146,7 @@ The chain of trust is how a browser decides to trust a certificate:
        └──📄 Leaf Cert            ← Installed on the server
            (*.example.com)
 
-The browser checks:
+The browser or other application checks:
   1. Does the leaf cert cover the hostname I'm connecting to?
   2. Was the leaf cert signed by the intermediate?
   3. Was the intermediate signed by a root I trust?
@@ -156,8 +156,8 @@ If any link in this chain is broken → 🔴 CONNECTION REFUSED.
 🚨 COMMON CHAIN PROBLEMS:
 
   ❌ Missing Intermediate:
-     The server only sends the leaf cert. Some browsers can "fill in the
-     gap" by fetching intermediates, but many clients can't.
+     The server only sends the leaf cert. Some browsers or applications can
+     "fill in the gap" by fetching intermediates, but many clients can't.
      Fix: Install the intermediate cert alongside the leaf cert.
 
   ❌ Wrong Order:
@@ -366,6 +366,23 @@ When something's wrong with TLS, here's your checklist:
    Look for: "🔄 Self-signed"
    Note: This might be intentional for internal services.
    If it's public-facing, get a real cert (Let's Encrypt is free!).
+
+9️⃣  CIPHER SUITE MISMATCH?
+   Symptom: "handshake failure" or "no shared cipher" errors
+   What it means: The client and server couldn't agree on an encryption
+   algorithm. They each have a list of cipher suites they support, and
+   if those lists have ZERO overlap, the connection fails.
+   Common causes:
+   • Server only allows modern ciphers (TLS 1.3) but client is old
+   • Client requires strong ciphers but server still offers only legacy ones
+   • Hardened server config disabled suites the client needs
+   • FIPS-mode clients that only allow a specific subset of ciphers
+   Run: peep scan <host> to see which cipher suites the server supports
+   Fix: Compare the server's supported suites with what the client needs.
+   One side needs to add support for a suite the other already has.
+   💡 If the server is yours, update the cipher suite config.
+      If the client is yours, update or patch the client.
+      If neither is yours... good luck.
 
 💡 PRO TIP: Use -v for detailed cert info, or -vv for PEM encoded certs:
    peep -v <host>
