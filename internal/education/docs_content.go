@@ -106,14 +106,18 @@ Think of certificates like a chain of vouching:
   • This cert signed the leaf cert — it's the notary.
   • The server MUST send this along with the leaf cert.
   • If it's missing, many clients will show an error.
-  • 💡 When someone says "install the CA cert," they usually mean this one.
+  • 💡 When someone says "Add the Issuing cert", "The Issuing cert is missing",
+       or "Make sure you send the Issuing cert with the Leaf" they mean this one.
   • There can be multiple intermediates in a chain.
 
 🏛️  ROOT CERTIFICATE (aka "Root CA" or "Trust Anchor")
   • The ultimate authority — the top of the trust chain.
   • This cert lives in your OS/browser's trust store.
   • The server should NOT send this — the client already has it.
-  • Root CAs are organizations like DigiCert, Let's Encrypt, Sectigo, etc.
+  • Root CAs are distributed by organizations like DigiCert, Let's Encrypt, Sectigo, etc.
+  • 💡 Your organization may also have its own Root CA (internal/private PKI).
+       If so, that Root CA cert must be installed on all corporate devices
+       (laptops, servers, phones) for internal services to be trusted.
 
 🎯 COMMON MISTAKES:
   1. Forgetting to install the intermediate cert → broken chain!
@@ -363,8 +367,8 @@ When something's wrong with TLS, here's your checklist:
    Note: This might be intentional for internal services.
    If it's public-facing, get a real cert (Let's Encrypt is free!).
 
-💡 PRO TIP: Always run peep with --why to get explanations:
-   peep --why <host>
+💡 PRO TIP: Use -v for detailed cert info, or -vv for PEM encoded certs:
+   peep -v <host>
 `,
 	}
 }
