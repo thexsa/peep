@@ -15,13 +15,10 @@ import (
 
 var chainCmd = &cobra.Command{
 	Use:   "chain <host>[:<port>]",
-	Short: "🔗 Show the certificate chain of trust",
+	Short: "Show the certificate chain of trust",
 	Long: `Focus on the certificate chain hierarchy. Shows a visual tree
 diagram of the chain of trust — who signed what, and whether
 the chain is complete and correctly ordered.
-
-Use this when you need to debug chain issues without the
-distraction of handshake details.
 
 Examples:
   peep chain example.com
@@ -38,7 +35,6 @@ func init() {
 func runChain(cmd *cobra.Command, args []string) error {
 	target := args[0]
 
-	// Strip protocol prefix
 	target = strings.TrimPrefix(target, "https://")
 	target = strings.TrimPrefix(target, "http://")
 	target = strings.TrimSuffix(target, "/")
@@ -52,12 +48,6 @@ func runChain(cmd *cobra.Command, args []string) error {
 		port = flagPort
 	}
 
-	personality := analyzer.Normal
-	if flagRude {
-		personality = analyzer.Rude
-	}
-
-	// Probe
 	result, err := probe.Probe(probe.ProbeOptions{
 		Host:    host,
 		Port:    port,
@@ -65,23 +55,21 @@ func runChain(cmd *cobra.Command, args []string) error {
 		Proto:   flagProto,
 	})
 	if err != nil {
-		fmt.Println(ui.Theme.ErrorStyle.Render(fmt.Sprintf("\n❌ Failed to connect: %s", err)))
+		fmt.Println(ui.Theme.ErrorStyle.Render(fmt.Sprintf("\n[FAIL] Failed to connect: %s", err)))
 		return nil
 	}
 
-	// Banner
 	fmt.Println(ui.RenderBanner(result.Host, result.Port, result.IP, result.Protocol))
 
-	// Analyze chain only
 	chain := analyzer.AnalyzeChain(result.ConnState, host, flagInsecure)
 
-	// Chain diagram
-	fmt.Println(ui.RenderChainDiagram(chain, personality))
-
-	// Detailed cert cards
+	// Cert details: Leaf → Intermediate → Root
 	for _, cert := range chain.Certificates {
-		fmt.Println(ui.RenderCertCard(cert, personality))
+		fmt.Println(ui.RenderCertCard(cert))
 	}
+
+	// Chain diagram
+	fmt.Println(ui.RenderChainDiagram(chain))
 
 	return nil
 }

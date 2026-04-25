@@ -38,15 +38,15 @@ func getTLSVersionName(v uint16) string {
 func gradeTLSVersion(v uint16) HealthStatus {
 	switch v {
 	case tls.VersionTLS13:
-		return ClearSkies
+		return MainCharacterEnergy
 	case tls.VersionTLS12:
-		return ClearSkies
+		return MainCharacterEnergy
 	case tls.VersionTLS11:
-		return Stormy
+		return WrittenInCrayon
 	case tls.VersionTLS10:
-		return Stormy
+		return WrittenInCrayon
 	default:
-		return Stormy
+		return WrittenInCrayon
 	}
 }
 
@@ -57,18 +57,18 @@ func gradeCipherSuite(id uint16) HealthStatus {
 	// Check against known secure suites first
 	for _, suite := range tls.CipherSuites() {
 		if suite.ID == id {
-			return ClearSkies
+			return MainCharacterEnergy
 		}
 	}
 
 	// Check insecure suites
 	for _, suite := range tls.InsecureCipherSuites() {
 		if suite.ID == id {
-			return Stormy
+			return WrittenInCrayon
 		}
 	}
 
 	// Heuristic-based grading from the name
 	_ = name
-	return Cloudy
+	return MallCopCredentials
 }

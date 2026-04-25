@@ -78,10 +78,10 @@ func AnalyzeCert(cert *x509.Certificate, depth int, totalCerts int, targetHost s
 	// Overall grade for this cert
 	analysis.OverallGrade = worstOf(analysis.ExpiryGrade, analysis.SignatureGrade, analysis.KeyGrade)
 	if depth == 0 && !analysis.HostnameMatch {
-		analysis.OverallGrade = Stormy
+		analysis.OverallGrade = WrittenInCrayon
 	}
 	if analysis.IsSelfSigned && depth == 0 {
-		analysis.OverallGrade = worst(analysis.OverallGrade, Cloudy)
+		analysis.OverallGrade = worst(analysis.OverallGrade, MallCopCredentials)
 	}
 
 	return analysis
@@ -109,15 +109,15 @@ func determineRole(cert *x509.Certificate, depth int, totalCerts int) CertRole {
 // gradeExpiry assigns a health status based on days remaining.
 func gradeExpiry(daysLeft int, isExpired bool) HealthStatus {
 	if isExpired {
-		return Stormy
+		return WrittenInCrayon
 	}
 	if daysLeft <= 30 {
-		return Stormy
+		return WrittenInCrayon
 	}
 	if daysLeft <= 90 {
-		return Cloudy
+		return MallCopCredentials
 	}
-	return ClearSkies
+	return MainCharacterEnergy
 }
 
 // gradeSignatureAlg grades the signature algorithm.
@@ -126,13 +126,13 @@ func gradeSignatureAlg(alg x509.SignatureAlgorithm) HealthStatus {
 	case x509.SHA256WithRSA, x509.SHA384WithRSA, x509.SHA512WithRSA,
 		x509.ECDSAWithSHA256, x509.ECDSAWithSHA384, x509.ECDSAWithSHA512,
 		x509.PureEd25519:
-		return ClearSkies
+		return MainCharacterEnergy
 	case x509.SHA1WithRSA, x509.ECDSAWithSHA1:
-		return Stormy
+		return WrittenInCrayon
 	case x509.MD5WithRSA, x509.MD2WithRSA:
-		return Stormy
+		return WrittenInCrayon
 	default:
-		return Cloudy
+		return MallCopCredentials
 	}
 }
 
@@ -157,23 +157,23 @@ func getKeyInfo(cert *x509.Certificate) (string, int) {
 func gradeKeyStrength(keyType string, bits int) HealthStatus {
 	if strings.HasPrefix(keyType, "RSA") {
 		if bits < 2048 {
-			return Stormy
+			return WrittenInCrayon
 		}
 		if bits < 4096 {
-			return ClearSkies // 2048 is still fine in 2025
+			return MainCharacterEnergy // 2048 is still fine in 2025
 		}
-		return ClearSkies
+		return MainCharacterEnergy
 	}
 	if strings.HasPrefix(keyType, "ECDSA") {
 		if bits < 256 {
-			return Cloudy
+			return MallCopCredentials
 		}
-		return ClearSkies
+		return MainCharacterEnergy
 	}
 	if keyType == "Ed25519" {
-		return ClearSkies
+		return MainCharacterEnergy
 	}
-	return Cloudy
+	return MallCopCredentials
 }
 
 // checkHostnameMatch verifies if the certificate covers the target hostname.
@@ -231,7 +231,7 @@ func matchHostname(pattern, hostname string) bool {
 
 // worstOf returns the worst health status from a list.
 func worstOf(statuses ...HealthStatus) HealthStatus {
-	result := ClearSkies
+	result := MainCharacterEnergy
 	for _, s := range statuses {
 		if s > result {
 			result = s

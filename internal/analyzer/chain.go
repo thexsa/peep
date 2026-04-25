@@ -80,21 +80,21 @@ func verifyTrustStore(certs []*x509.Certificate, hostname string) (bool, string)
 }
 
 func gradeChain(a ChainAnalysis) HealthStatus {
-	grade := ClearSkies
+	grade := MainCharacterEnergy
 	for _, cert := range a.Certificates {
 		grade = worst(grade, cert.OverallGrade)
 	}
 	if !a.ChainOrderCorrect {
-		grade = worst(grade, Stormy)
+		grade = worst(grade, WrittenInCrayon)
 	}
 	if a.HasMissingIntermediate {
-		grade = worst(grade, Stormy)
+		grade = worst(grade, WrittenInCrayon)
 	}
 	if a.HasUnnecessaryRoot {
-		grade = worst(grade, Cloudy)
+		grade = worst(grade, MallCopCredentials)
 	}
 	if a.VerificationError != "" {
-		grade = worst(grade, Stormy)
+		grade = worst(grade, WrittenInCrayon)
 	}
 	return grade
 }

@@ -2,61 +2,66 @@ package ui
 
 import (
 	"fmt"
+	"math/rand"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/thexsa/peep/internal/analyzer"
 )
 
 // RenderHandshakeCard renders the TLS handshake summary.
-func RenderHandshakeCard(hs analyzer.HandshakeAnalysis, personality analyzer.Personality) string {
-	header := Theme.TitleStyle.Render("🤝 TLS Handshake")
+func RenderHandshakeCard(hs analyzer.HandshakeAnalysis) string {
+	header := Theme.BoldStyle.Render("TLS HANDSHAKE")
 
 	var lines []string
 	lines = append(lines, header)
 	lines = append(lines, "")
 
 	// TLS Version
-	versionGrade := StatusBadge(hs.VersionGrade)
-	versionComment := tlsVersionComment(hs.TLSVersion, personality)
+	versionGrade := StatusIcon(hs.VersionGrade)
 	lines = append(lines, renderKV("TLS Version", fmt.Sprintf("%s  %s", hs.TLSVersion, versionGrade)))
-	if versionComment != "" {
-		lines = append(lines, fmt.Sprintf("                 %s", Theme.MutedStyle.Render(versionComment)))
+	comment := tlsVersionComment(hs.TLSVersion)
+	if comment != "" {
+		lines = append(lines, fmt.Sprintf("                   %s", Theme.MutedStyle.Render(comment)))
 	}
 
 	// Cipher Suite
-	cipherGrade := StatusBadge(hs.CipherGrade)
+	cipherGrade := StatusIcon(hs.CipherGrade)
 	lines = append(lines, renderKV("Cipher Suite", fmt.Sprintf("%s  %s", hs.CipherSuite, cipherGrade)))
 
-	// Overall
-	lines = append(lines, "")
-	lines = append(lines, renderKV("Handshake", fmt.Sprintf("%s  %s", StatusBadge(hs.OverallGrade), StatusDescription(hs.OverallGrade, personality))))
-
 	content := lipgloss.JoinVertical(lipgloss.Left, lines...)
-	return Theme.CardStyle.Render(content)
+	return Theme.SectionStyle.Render(content) + "\n"
 }
 
-func tlsVersionComment(version string, personality analyzer.Personality) string {
+func tlsVersionComment(version string) string {
 	switch version {
 	case "TLSv1.3":
-		if personality == analyzer.Rude {
-			return "Finally, someone who keeps up with the times."
+		pool := []string{
+			"Finally, someone who keeps up with the times.",
+			"The gold standard. This is the way.",
+			"TLS 1.3 — fast, secure, and not from the stone age.",
 		}
-		return "The gold standard. Fast and secure."
+		return pool[rand.Intn(len(pool))]
 	case "TLSv1.2":
-		if personality == analyzer.Rude {
-			return "Fine. Not exciting, but it'll do. Like plain oatmeal."
+		pool := []string{
+			"Fine. Not exciting, but it'll do. Like plain oatmeal.",
+			"Acceptable. Provided the cipher suite isn't garbage.",
+			"TLS 1.2 — the Honda Civic of encryption. Reliable, boring.",
 		}
-		return "Still solid with the right cipher suites."
+		return pool[rand.Intn(len(pool))]
 	case "TLSv1.1":
-		if personality == analyzer.Rude {
-			return "TLS 1.1?! What year is it? This was deprecated before TikTok existed."
+		pool := []string{
+			"TLS 1.1?! What year is it? This was deprecated before TikTok existed.",
+			"Deprecated since 2021. You're two protocol generations behind.",
+			"TLS 1.1 — the Internet's equivalent of using a flip phone in 2026.",
 		}
-		return "Deprecated since 2021. Time to upgrade."
+		return pool[rand.Intn(len(pool))]
 	case "TLSv1.0":
-		if personality == analyzer.Rude {
-			return "TLS 1.0. NINETEEN NINETY NINE called and wants its protocol back."
+		pool := []string{
+			"TLS 1.0. NINETEEN NINETY NINE called and wants its protocol back.",
+			"Screen door on a bank vault. Anyone can walk through it.",
+			"This protocol has more holes than Swiss cheese at a shooting range.",
 		}
-		return "Screen door on a bank vault. Anyone can get through it."
+		return pool[rand.Intn(len(pool))]
 	default:
 		return ""
 	}

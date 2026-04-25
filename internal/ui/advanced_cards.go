@@ -9,8 +9,8 @@ import (
 )
 
 // RenderOCSPResult renders the OCSP check result.
-func RenderOCSPResult(result analyzer.OCSPResult, personality analyzer.Personality) string {
-	header := Theme.TitleStyle.Render("🔍 OCSP Revocation Check")
+func RenderOCSPResult(result analyzer.OCSPResult) string {
+	header := Theme.BoldStyle.Render("OCSP REVOCATION CHECK")
 
 	var lines []string
 	lines = append(lines, header)
@@ -18,9 +18,9 @@ func RenderOCSPResult(result analyzer.OCSPResult, personality analyzer.Personali
 
 	switch result.Status {
 	case analyzer.OCSPGood:
-		lines = append(lines, renderKV("Status", Theme.SuccessStyle.Render("✅ Good — not revoked")))
+		lines = append(lines, renderKV("Status", Theme.SuccessStyle.Render("Good — not revoked")))
 	case analyzer.OCSPRevoked:
-		lines = append(lines, renderKV("Status", Theme.ErrorStyle.Render("❌ REVOKED")))
+		lines = append(lines, renderKV("Status", Theme.ErrorStyle.Render("REVOKED")))
 		if !result.RevokedAt.IsZero() {
 			lines = append(lines, renderKV("Revoked At", result.RevokedAt.Format("Jan 02, 2006 15:04:05 MST")))
 		}
@@ -28,9 +28,9 @@ func RenderOCSPResult(result analyzer.OCSPResult, personality analyzer.Personali
 			lines = append(lines, renderKV("Reason", result.RevokeReason))
 		}
 	case analyzer.OCSPUnknown:
-		lines = append(lines, renderKV("Status", Theme.WarningStyle.Render("⚠️  Unknown")))
+		lines = append(lines, renderKV("Status", Theme.WarningStyle.Render("Unknown")))
 	case analyzer.OCSPError:
-		lines = append(lines, renderKV("Status", Theme.WarningStyle.Render("⚠️  Error checking")))
+		lines = append(lines, renderKV("Status", Theme.WarningStyle.Render("Error checking")))
 	}
 
 	if result.Error != "" && result.Status != analyzer.OCSPGood {
@@ -49,41 +49,37 @@ func RenderOCSPResult(result analyzer.OCSPResult, personality analyzer.Personali
 	}
 
 	content := lipgloss.JoinVertical(lipgloss.Left, lines...)
-	return Theme.CardStyle.Render(content)
+	return Theme.SectionStyle.Render(content) + "\n"
 }
 
 // RenderCTLogResult renders the Certificate Transparency log check.
-func RenderCTLogResult(result analyzer.CTLogResult, personality analyzer.Personality) string {
-	header := Theme.TitleStyle.Render("📜 Certificate Transparency")
+func RenderCTLogResult(result analyzer.CTLogResult) string {
+	header := Theme.BoldStyle.Render("CERTIFICATE TRANSPARENCY")
 
 	var lines []string
 	lines = append(lines, header)
 	lines = append(lines, "")
 
 	if result.Error != "" {
-		lines = append(lines, renderKV("Status", Theme.WarningStyle.Render("⚠️  Could not check CT logs")))
+		lines = append(lines, renderKV("Status", Theme.WarningStyle.Render("Could not check CT logs")))
 		lines = append(lines, renderKV("Detail", Theme.MutedStyle.Render(result.Error)))
 	} else if result.Found {
-		lines = append(lines, renderKV("Status", Theme.SuccessStyle.Render("✅ Found in CT logs")))
+		lines = append(lines, renderKV("Status", Theme.SuccessStyle.Render("Found in CT logs")))
 		lines = append(lines, renderKV("Entries", fmt.Sprintf("%d log entries found", result.LogCount)))
 		if result.FirstSeen != "" {
 			lines = append(lines, renderKV("First Seen", result.FirstSeen))
 		}
 	} else {
-		msg := "⚠️  Not found in CT logs"
-		if personality == analyzer.Rude {
-			msg = "⚠️  Not in CT logs — either it's brand new or someone's hiding something"
-		}
-		lines = append(lines, renderKV("Status", Theme.WarningStyle.Render(msg)))
+		lines = append(lines, renderKV("Status", Theme.WarningStyle.Render("Not in CT logs — either brand new or someone's hiding something")))
 	}
 
 	content := lipgloss.JoinVertical(lipgloss.Left, lines...)
-	return Theme.CardStyle.Render(content)
+	return Theme.SectionStyle.Render(content) + "\n"
 }
 
 // RenderCipherEnum renders the cipher suite enumeration results.
-func RenderCipherEnum(result analyzer.CipherEnumResult, personality analyzer.Personality) string {
-	header := Theme.TitleStyle.Render("🔐 Supported Cipher Suites & TLS Versions")
+func RenderCipherEnum(result analyzer.CipherEnumResult) string {
+	header := Theme.BoldStyle.Render("SUPPORTED CIPHER SUITES & TLS VERSIONS")
 
 	var lines []string
 	lines = append(lines, header)
@@ -94,7 +90,7 @@ func RenderCipherEnum(result analyzer.CipherEnumResult, personality analyzer.Per
 	for _, v := range result.TLSVersions {
 		status := Theme.MutedStyle.Render("not supported")
 		if v.Supported {
-			status = StatusBadge(v.Grade)
+			status = StatusIcon(v.Grade)
 		}
 		lines = append(lines, fmt.Sprintf("  %-10s %s", v.Version, status))
 	}
@@ -104,52 +100,48 @@ func RenderCipherEnum(result analyzer.CipherEnumResult, personality analyzer.Per
 	lines = append(lines, Theme.BoldStyle.Render(fmt.Sprintf("Cipher Suites (%d supported):", len(result.SupportedSuites))))
 
 	// Group by grade
-	var stormy, clear []analyzer.CipherSuiteInfo
+	var bad, good []analyzer.CipherSuiteInfo
 	for _, suite := range result.SupportedSuites {
-		if suite.Grade == analyzer.Stormy {
-			stormy = append(stormy, suite)
+		if suite.Grade == analyzer.WrittenInCrayon {
+			bad = append(bad, suite)
 		} else {
-			clear = append(clear, suite)
+			good = append(good, suite)
 		}
 	}
 
-	if len(stormy) > 0 {
+	if len(bad) > 0 {
 		lines = append(lines, "")
-		lines = append(lines, Theme.ErrorStyle.Render(fmt.Sprintf("  ❌ Insecure Suites (%d):", len(stormy))))
-		for _, suite := range stormy {
+		lines = append(lines, Theme.ErrorStyle.Render(fmt.Sprintf("  Insecure (%d):", len(bad))))
+		for _, suite := range bad {
 			lines = append(lines, fmt.Sprintf("    %s %s",
-				Theme.ErrorStyle.Render("✗"),
+				Theme.ErrorStyle.Render("x"),
 				Theme.MutedStyle.Render(suite.Name)))
 		}
 	}
 
-	if len(clear) > 0 {
+	if len(good) > 0 {
 		lines = append(lines, "")
-		lines = append(lines, Theme.SuccessStyle.Render(fmt.Sprintf("  ✅ Secure Suites (%d):", len(clear))))
-		for _, suite := range clear {
+		lines = append(lines, Theme.SuccessStyle.Render(fmt.Sprintf("  Secure (%d):", len(good))))
+		for _, suite := range good {
 			lines = append(lines, fmt.Sprintf("    %s %s [%s]",
-				Theme.SuccessStyle.Render("✓"),
+				Theme.SuccessStyle.Render("+"),
 				suite.Name,
 				Theme.MutedStyle.Render(suite.Version)))
 		}
 	}
 
 	if len(result.SupportedSuites) == 0 {
-		lines = append(lines, Theme.MutedStyle.Render("  No cipher suites detected (server may have closed connections)"))
+		lines = append(lines, Theme.MutedStyle.Render("  No cipher suites detected"))
 	}
 
 	// Summary
 	lines = append(lines, "")
-	if len(stormy) > 0 {
-		msg := fmt.Sprintf("⚠️  %d insecure cipher suite(s) detected!", len(stormy))
-		if personality == analyzer.Rude {
-			msg += " Disable them. Yesterday."
-		}
-		lines = append(lines, Theme.ErrorStyle.Render(msg))
-	} else if len(clear) > 0 {
-		lines = append(lines, Theme.SuccessStyle.Render("All supported cipher suites are secure. 👍"))
+	if len(bad) > 0 {
+		lines = append(lines, Theme.ErrorStyle.Render(fmt.Sprintf("%d insecure cipher suite(s) detected. Disable them. Yesterday.", len(bad))))
+	} else if len(good) > 0 {
+		lines = append(lines, Theme.SuccessStyle.Render("All supported cipher suites are secure."))
 	}
 
 	content := strings.Join(lines, "\n")
-	return Theme.CardStyle.Render(content)
+	return Theme.SectionStyle.Render(content) + "\n"
 }

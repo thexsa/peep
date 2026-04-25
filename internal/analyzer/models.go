@@ -9,37 +9,27 @@ import (
 type HealthStatus int
 
 const (
-	// ClearSkies — everything looks great, no issues found.
-	ClearSkies HealthStatus = iota
-	// Cloudy — not broken, but there are concerns (weak config, expiring soon, etc.).
-	Cloudy
-	// Stormy — critical issues: expired certs, broken chains, dangerous ciphers.
-	Stormy
+	// MainCharacterEnergy — everything looks great, no issues found.
+	MainCharacterEnergy HealthStatus = iota
+	// MallCopCredentials — not broken, but there are concerns (weak config, expiring soon, etc.).
+	MallCopCredentials
+	// WrittenInCrayon — critical issues: expired certs, broken chains, dangerous ciphers.
+	WrittenInCrayon
 )
 
-// String returns the emoji + label for a health status.
+// String returns the label for a health status.
 func (h HealthStatus) String() string {
 	switch h {
-	case ClearSkies:
-		return "✅ Clear Skies"
-	case Cloudy:
-		return "⚠️  Cloudy"
-	case Stormy:
-		return "❌ Stormy"
+	case MainCharacterEnergy:
+		return "Main Character Energy"
+	case MallCopCredentials:
+		return "Mall Cop Credentials"
+	case WrittenInCrayon:
+		return "Appears to be Written in Crayon"
 	default:
-		return "❓ Unknown"
+		return "Unknown"
 	}
 }
-
-// Personality controls the tone of output messages.
-type Personality int
-
-const (
-	// Normal — sarcastic but helpful.
-	Normal Personality = iota
-	// Rude — gloves off, brutally honest.
-	Rude
-)
 
 // Warning represents a single diagnostic finding.
 type Warning struct {
@@ -47,16 +37,7 @@ type Warning struct {
 	Severity HealthStatus // How bad is it?
 	Title    string       // Short human title: "Ancient TLS Version"
 	Detail   string       // Technical detail string
-	WhyNormal string      // --why explanation (normal personality)
-	WhyRude   string      // --why explanation (rude personality)
-}
-
-// Why returns the appropriate explanation based on personality.
-func (w Warning) Why(p Personality) string {
-	if p == Rude {
-		return w.WhyRude
-	}
-	return w.WhyNormal
+	Why      string       // --why explanation
 }
 
 // TargetInfo holds information about the connection target.
@@ -88,17 +69,17 @@ const (
 	RoleRoot
 )
 
-// String returns the emoji + label for a cert role.
+// String returns the label for a cert role.
 func (r CertRole) String() string {
 	switch r {
 	case RoleLeaf:
-		return "📄 Leaf"
+		return "Leaf"
 	case RoleIntermediate:
-		return "📋 Intermediate (Issuing CA)"
+		return "Issuing CA"
 	case RoleRoot:
-		return "🏛️  Root CA"
+		return "Root CA"
 	default:
-		return "❓ Unknown"
+		return "Unknown"
 	}
 }
 
@@ -106,16 +87,16 @@ func (r CertRole) String() string {
 func (r CertRole) RoleExplanation() string {
 	switch r {
 	case RoleLeaf:
-		return "This is the cert that proves the server's identity. It's the one that matches " +
-			"the hostname you typed. It can NOT sign other certs."
+		return "This is the server's identity cert — the one that proves \"I am who I say I am.\" " +
+			"It matches the hostname you typed and cannot sign other certs."
 	case RoleIntermediate:
-		return "This cert signed the leaf cert. Think of it as a notary — it vouches for the leaf. " +
-			"The server MUST send this, or browsers won't trust the leaf. " +
-			"This is usually the cert you need when someone says 'install the CA cert.'"
+		return "The notary. This cert vouches for the leaf. " +
+			"The server MUST send this or browsers will throw a tantrum. " +
+			"When someone says 'install the CA cert,' this is usually what they mean."
 	case RoleRoot:
-		return "The ultimate authority. This lives in your OS/browser trust store. " +
-			"Servers usually should NOT send this — your computer already has it. " +
-			"If you see it in the chain, it's unnecessary baggage."
+		return "The boss. Lives in your OS/browser trust store. " +
+			"The server shouldn't send this — your machine already has it. " +
+			"If it's in the chain, it's dead weight."
 	default:
 		return ""
 	}

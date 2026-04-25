@@ -114,7 +114,7 @@ func enumerateTLS12Ciphers(target, hostname string, timeout time.Duration) []Cip
 				Name:    suite.Name,
 				Version: formatSuiteVersions(suite.SupportedVersions),
 				Secure:  true,
-				Grade:   ClearSkies,
+				Grade:   MainCharacterEnergy,
 			})
 		}
 	}
@@ -127,7 +127,7 @@ func enumerateTLS12Ciphers(target, hostname string, timeout time.Duration) []Cip
 				Name:    suite.Name,
 				Version: formatSuiteVersions(suite.SupportedVersions),
 				Secure:  false,
-				Grade:   Stormy,
+				Grade:   WrittenInCrayon,
 			})
 		}
 	}
@@ -158,9 +158,9 @@ func testCipherSuite(target, hostname string, suiteID uint16, timeout time.Durat
 // TLS 1.3 suites can't be configured in Go — they're always available.
 func getTLS13Suites() []CipherSuiteInfo {
 	return []CipherSuiteInfo{
-		{Name: "TLS_AES_128_GCM_SHA256", Version: "TLSv1.3", Secure: true, Grade: ClearSkies},
-		{Name: "TLS_AES_256_GCM_SHA384", Version: "TLSv1.3", Secure: true, Grade: ClearSkies},
-		{Name: "TLS_CHACHA20_POLY1305_SHA256", Version: "TLSv1.3", Secure: true, Grade: ClearSkies},
+		{Name: "TLS_AES_128_GCM_SHA256", Version: "TLSv1.3", Secure: true, Grade: MainCharacterEnergy},
+		{Name: "TLS_AES_256_GCM_SHA384", Version: "TLSv1.3", Secure: true, Grade: MainCharacterEnergy},
+		{Name: "TLS_CHACHA20_POLY1305_SHA256", Version: "TLSv1.3", Secure: true, Grade: MainCharacterEnergy},
 	}
 }
 
