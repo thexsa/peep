@@ -84,8 +84,7 @@ var Theme = struct {
 		BorderLeft(true).
 		BorderStyle(lipgloss.NormalBorder()).
 		BorderForeground(lipgloss.Color("#475569")).
-		PaddingLeft(2).
-		MarginBottom(1),
+		PaddingLeft(2),
 
 	KeyStyle: lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#94A3B8")).
