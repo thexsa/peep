@@ -7,7 +7,8 @@ import (
 )
 
 // RenderWarnings renders all warnings with explanations.
-func RenderWarnings(warnings []analyzer.Warning) string {
+// When explain is true, adds detailed explanation, fix, and doc reference.
+func RenderWarnings(warnings []analyzer.Warning, explain bool) string {
 	if len(warnings) == 0 {
 		return ""
 	}
@@ -25,6 +26,25 @@ func RenderWarnings(warnings []analyzer.Warning) string {
 
 		if w.Why != "" {
 			lines = append(lines, fmt.Sprintf("     %s", Theme.InfoStyle.Render(w.Why)))
+		}
+
+		if explain {
+			if w.Explain != "" {
+				lines = append(lines, "")
+				lines = append(lines, fmt.Sprintf("     %s", Theme.BoldStyle.Render("Why this matters:")))
+				lines = append(lines, fmt.Sprintf("     %s", Theme.MutedStyle.Render(w.Explain)))
+			}
+			if w.Fix != "" {
+				lines = append(lines, "")
+				lines = append(lines, fmt.Sprintf("     %s", Theme.BoldStyle.Render("Recommended fix:")))
+				lines = append(lines, fmt.Sprintf("     %s", Theme.SuccessStyle.Render(w.Fix)))
+			}
+			if w.DocRef != "" {
+				lines = append(lines, "")
+				lines = append(lines, fmt.Sprintf("     %s  %s",
+					Theme.MutedStyle.Render("📖 Learn more:"),
+					Theme.InfoStyle.Render(w.DocRef)))
+			}
 		}
 		lines = append(lines, "")
 	}

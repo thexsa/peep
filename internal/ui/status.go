@@ -182,3 +182,21 @@ var criticalExpirySayings = []string{
 	"If this expires on your watch, that's a resume event.",
 	"This cert is on life support. Pull the renewal trigger.",
 }
+
+// RandomScanComment returns a sarcastic remark about the scan duration.
+func RandomScanComment() string {
+	return scanDurationSayings[rand.Intn(len(scanDurationSayings))]
+}
+
+var scanDurationSayings = []string{
+	"That's faster than your last DNS lookup.",
+	"Faster than reading the man page for openssl s_client.",
+	"You're welcome. That would've taken 20 minutes with openssl.",
+	"And that's without the existential dread of reading ASN.1.",
+	"Quicker than a standup meeting, and actually useful.",
+	"That's less time than it takes to google 'how to check TLS cert.'",
+	"Done before your coffee got cold. You're welcome.",
+	"Faster than filing a Jira ticket about it.",
+	"We just did what 3 engineers and a wiki page couldn't.",
+	"That's the entire chain, verified, explained, and judged. In milliseconds.",
+}

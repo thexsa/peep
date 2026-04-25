@@ -37,7 +37,10 @@ type Warning struct {
 	Severity HealthStatus // How bad is it?
 	Title    string       // Short human title: "Ancient TLS Version"
 	Detail   string       // Technical detail string
-	Why      string       // --why explanation
+	Why      string       // Sarcastic commentary
+	Explain  string       // --explain: detailed explanation of why this matters
+	Fix      string       // --explain: recommended fix
+	DocRef   string       // --explain: peep docs command for more info
 }
 
 // TargetInfo holds information about the connection target.

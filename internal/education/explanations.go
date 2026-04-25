@@ -33,6 +33,9 @@ func checkTLSVersion(hs analyzer.HandshakeAnalysis) []analyzer.Warning {
 			Title:    "Ancient TLS Version: TLS 1.0",
 			Detail:   "TLS 1.0 was deprecated by RFC 8996 in March 2021.",
 			Why:      pick(tlsOldSayings),
+			Explain:  "TLS 1.0 (from 1999) has known vulnerabilities including BEAST and POODLE attacks. It uses a 2-round-trip handshake with weak cipher negotiation. Attackers can downgrade connections and decrypt traffic. Every major compliance framework (PCI-DSS, HIPAA, NIST) prohibits TLS 1.0.",
+			Fix:      "Disable TLS 1.0 in your server configuration. Enable TLS 1.2 (minimum) or TLS 1.3 (preferred). In nginx: ssl_protocols TLSv1.2 TLSv1.3; In Apache: SSLProtocol all -SSLv3 -TLSv1 -TLSv1.1",
+			DocRef:   "peep docs tls",
 		})
 	case "TLSv1.1":
 		w = append(w, analyzer.Warning{
@@ -41,7 +44,12 @@ func checkTLSVersion(hs analyzer.HandshakeAnalysis) []analyzer.Warning {
 			Title:    "Deprecated TLS Version: TLS 1.1",
 			Detail:   "TLS 1.1 was deprecated by RFC 8996 in March 2021.",
 			Why:      pick(tlsOldSayings),
+			Explain:  "TLS 1.1 (from 2006) was deprecated alongside TLS 1.0. While slightly better than 1.0, it still lacks modern protections like AEAD ciphers and has a slower 2-round-trip handshake. All major browsers dropped support in 2020. PCI-DSS and NIST require TLS 1.2 or higher.",
+			Fix:      "Disable TLS 1.1 in your server configuration. Enable TLS 1.2 (minimum) or TLS 1.3 (preferred). Test with: peep scan <host> to verify which versions are still enabled.",
+			DocRef:   "peep docs tls",
 		})
+	case "TLSv1.2":
+		// TLS 1.2 is fine, no warning needed unless cipher is bad
 	}
 	return w
 }
@@ -55,6 +63,9 @@ func checkCipherSuite(hs analyzer.HandshakeAnalysis) []analyzer.Warning {
 			Title:    "Insecure Cipher Suite: " + hs.CipherSuite,
 			Detail:   "This cipher suite is classified as insecure.",
 			Why:      pick(cipherInsecureSayings),
+			Explain:  "This cipher suite has known cryptographic weaknesses. Depending on the specific suite, it may be vulnerable to attacks like BEAST, POODLE, Sweet32, or Lucky13. Insecure ciphers can allow attackers to decrypt traffic, forge data, or downgrade connections. Note: HTTP/2 has a blacklist of cipher suites — using an insecure cipher may also break HTTP/2 connections.",
+			Fix:      "Update your server's cipher suite configuration to use only secure options: AES-128-GCM, AES-256-GCM, or ChaCha20-Poly1305 with ECDHE key exchange. Disable RC4, DES, 3DES, NULL, EXPORT, and CBC-mode ciphers. Use: peep scan <host> to see all supported cipher suites.",
+			DocRef:   "peep docs ciphers",
 		})
 	}
 	return w
@@ -70,6 +81,9 @@ func checkCert(cert analyzer.CertAnalysis) []analyzer.Warning {
 			Title:    certPrefix(cert) + "Certificate EXPIRED",
 			Detail:   "This certificate expired " + pluralDays(-cert.DaysRemaining) + " ago.",
 			Why:      pick(certExpiredSayings),
+			Explain:  "An expired certificate means EVERY client connecting to this server will see a security warning or outright connection failure. Browsers show a full-page error. APIs return TLS errors. Automated systems stop working. The certificate's validity period is cryptographically enforced — there is no workaround except renewal.",
+			Fix:      "Renew the certificate immediately from your CA (Certificate Authority). If using Let's Encrypt, run: certbot renew. If using a commercial CA, reissue from their portal. After renewal, install the new cert and restart the service.",
+			DocRef:   "peep docs certs",
 		})
 	} else if cert.DaysRemaining <= 14 {
 		w = append(w, analyzer.Warning{
@@ -78,6 +92,9 @@ func checkCert(cert analyzer.CertAnalysis) []analyzer.Warning {
 			Title:    certPrefix(cert) + "Certificate Expiring VERY Soon",
 			Detail:   "This certificate expires in " + pluralDays(cert.DaysRemaining) + ".",
 			Why:      pick(certExpiringSoonSayings),
+			Explain:  "With less than 14 days until expiry, this certificate is in the danger zone. Certificate renewals can take time — CA validation, DNS propagation, deployment, and testing. If this expires, all clients will see security errors and connections will fail. Many organizations require 30+ days lead time for cert renewals.",
+			Fix:      "Renew this certificate NOW. Don't wait. If using Let's Encrypt: certbot renew. If using a commercial CA, log into their portal and reissue. Deploy the new cert and verify with: peep <host>",
+			DocRef:   "peep docs certs",
 		})
 	} else if cert.DaysRemaining <= 30 {
 		w = append(w, analyzer.Warning{
@@ -86,6 +103,9 @@ func checkCert(cert analyzer.CertAnalysis) []analyzer.Warning {
 			Title:    certPrefix(cert) + "Certificate Expiring Soon",
 			Detail:   "This certificate expires in " + pluralDays(cert.DaysRemaining) + ".",
 			Why:      pick(certExpiringSayings),
+			Explain:  "This certificate is within 30 days of expiry. While it's still valid, this is the window where you should be actively renewing. Unexpected delays (CA outages, DNS issues, approval processes, vacation) can push you past the expiry date. Set up automated renewal if possible.",
+			Fix:      "Start the renewal process now. For automated certs (Let's Encrypt), verify your renewal cron job is working. For commercial CAs, submit the renewal request. Consider setting up cert monitoring to avoid this in the future.",
+			DocRef:   "peep docs certs",
 		})
 	}
 
@@ -96,6 +116,9 @@ func checkCert(cert analyzer.CertAnalysis) []analyzer.Warning {
 			Title:    "Self-Signed Certificate",
 			Detail:   "This certificate was signed by itself, not by a trusted CA.",
 			Why:      pick(selfSignedSayings),
+			Explain:  "A self-signed certificate has no third-party validation. It was signed by its own private key, meaning there's no chain of trust — no CA vouches for it. Every browser and most applications will show a security warning or refuse to connect. Self-signed certs are fine for development and internal testing, but in production they undermine the entire trust model of TLS.",
+			Fix:      "Replace with a certificate from a trusted CA. Let's Encrypt provides free, automated certificates. For internal services, use your organization's internal CA (private PKI) and ensure the root CA cert is installed on all client devices.",
+			DocRef:   "peep docs certs",
 		})
 	}
 
@@ -106,6 +129,9 @@ func checkCert(cert analyzer.CertAnalysis) []analyzer.Warning {
 			Title:    certPrefix(cert) + "Weak Key",
 			Detail:   "Key type: " + cert.KeyType + ".",
 			Why:      pick(weakKeySayings),
+			Explain:  "This certificate's key is too short to be considered secure. Short keys can be brute-forced with modern hardware. NIST recommends: RSA keys ≥ 2048 bits, ECDSA keys ≥ 256 bits (P-256 or higher). Keys shorter than this can be factored or broken within a practical timeframe.",
+			Fix:      "Generate a new key pair with a strong key size: RSA 2048+ bits or ECDSA P-256/P-384. Then request a new certificate using the new key. Most CAs allow free reissuance.",
+			DocRef:   "peep docs certs",
 		})
 	}
 
@@ -116,6 +142,9 @@ func checkCert(cert analyzer.CertAnalysis) []analyzer.Warning {
 			Title:    certPrefix(cert) + "Insecure Signature Algorithm: " + cert.SignatureAlg,
 			Detail:   "This certificate uses a signature algorithm with known weaknesses.",
 			Why:      pick(sha1Sayings),
+			Explain:  "SHA-1 signatures were proven vulnerable to collision attacks in 2017 (Google's SHAttered attack). This means an attacker could potentially forge a certificate that appears valid. All major browsers stopped trusting SHA-1 signed certificates. SHA-256 (SHA-2) or higher is required.",
+			Fix:      "Reissue the certificate with SHA-256 (SHA-2) or higher signature algorithm. Most CAs default to SHA-256 now. If your CA issued this with SHA-1, contact them — they may be using outdated infrastructure.",
+			DocRef:   "peep docs certs",
 		})
 	}
 
@@ -126,6 +155,9 @@ func checkCert(cert analyzer.CertAnalysis) []analyzer.Warning {
 			Title:    "Hostname Mismatch",
 			Detail:   "The certificate does not cover the hostname you connected to.",
 			Why:      pick(hostnameMismatchSayings),
+			Explain:  "The hostname you connected to is not listed in the certificate's Subject Alternative Names (SANs). Browsers and applications verify that the cert covers the exact hostname — if it doesn't match, the connection is rejected. This usually means the wrong cert is installed, or the cert was issued for a different domain.",
+			Fix:      "Check the SANs on the certificate (shown in -v output). Either: (1) install the correct certificate that covers this hostname, (2) reissue the cert to include this hostname as a SAN, or (3) verify you're connecting to the right server.",
+			DocRef:   "peep docs troubleshooting",
 		})
 	}
 
@@ -142,6 +174,9 @@ func checkChain(chain analyzer.ChainAnalysis) []analyzer.Warning {
 			Title:    "Missing Intermediate Certificate",
 			Detail:   "The server did not send all required intermediate certificates.",
 			Why:      pick(missingIntermediateSayings),
+			Explain:  "The server must send the complete certificate chain: leaf cert + intermediate cert(s). Without the intermediate, clients can't build a path from your leaf cert to a trusted root CA. Some browsers (like Chrome) can fetch missing intermediates via AIA, but most applications, APIs, curl, and mobile apps cannot — they will fail.",
+			Fix:      "Download the correct intermediate certificate from your CA's website. Concatenate it with your leaf cert (leaf first, then intermediate). In nginx: ssl_certificate should contain both. In Apache: use SSLCertificateChainFile. Verify with: peep <host>",
+			DocRef:   "peep docs chain",
 		})
 	}
 
@@ -152,6 +187,9 @@ func checkChain(chain analyzer.ChainAnalysis) []analyzer.Warning {
 			Title:    "Leaf-Only Chain — Intermediate CA Not Included",
 			Detail:   "Only the leaf cert was sent. Its issuer is NOT a root CA.",
 			Why:      pick(leafOnlySayings),
+			Explain:  "The server sent ONLY the leaf certificate. The issuing CA (the cert that signed the leaf) is an intermediate CA, not a root CA. This means clients cannot verify the chain unless they happen to have the intermediate CA cert already installed — which most don't. Root CAs belong in trust stores; intermediate CAs belong in the server's chain.",
+			Fix:      "Add the intermediate certificate to your server's cert chain. The correct order is: leaf cert → intermediate cert(s). Download the intermediate from your CA's repository. Do NOT rely on clients having the intermediate pre-installed.",
+			DocRef:   "peep docs chain",
 		})
 	}
 
@@ -162,6 +200,9 @@ func checkChain(chain analyzer.ChainAnalysis) []analyzer.Warning {
 			Title:    "Certificate Chain in Wrong Order",
 			Detail:   "Certificates should be ordered: leaf → intermediate(s) → root.",
 			Why:      pick(wrongOrderSayings),
+			Explain:  "The TLS specification requires certificates to be sent in order: the leaf cert first, followed by the intermediate(s) that signed it, optionally ending with the root. If the chain is out of order, many TLS implementations will reject it outright or fail to build the trust path.",
+			Fix:      "Re-concatenate your certificate files in the correct order: cat leaf.crt intermediate.crt > fullchain.crt. Make sure the leaf cert (the one with your domain) is FIRST in the file.",
+			DocRef:   "peep docs chain",
 		})
 	}
 
@@ -172,6 +213,9 @@ func checkChain(chain analyzer.ChainAnalysis) []analyzer.Warning {
 			Title:    "Unnecessary Root CA in Chain",
 			Detail:   "The server is sending the root CA certificate, which clients already have.",
 			Why:      pick(unnecessaryRootSayings),
+			Explain:  "The root CA certificate is already in the client's trust store (OS/browser). Sending it in the TLS handshake adds unnecessary bytes to every connection. It's not harmful, but it's wasteful — especially on high-traffic servers. The correct chain is: leaf → intermediate(s). No root needed.",
+			Fix:      "Remove the root CA certificate from your server's cert chain file. Keep only the leaf and intermediate certificates. The root is already trusted by the client.",
+			DocRef:   "peep docs chain",
 		})
 	}
 
@@ -182,6 +226,9 @@ func checkChain(chain analyzer.ChainAnalysis) []analyzer.Warning {
 			Title:    "Chain Verification Failed",
 			Detail:   "Trust store verification error: " + chain.VerificationError,
 			Why:      pick(verificationFailedSayings),
+			Explain:  "The system trust store could not verify this certificate chain. This means the chain is broken — either a cert is missing, expired, self-signed, or issued by an untrusted CA. Every client connecting to this server will see a security error. Browsers show a full-page warning. APIs get TLS errors. Automated systems fail silently or loudly.",
+			Fix:      "Check the chain: (1) Is the leaf cert expired? (2) Is the intermediate cert included? (3) Is the CA trusted by the client's OS? For self-signed certs, either replace with a CA-signed cert or add the self-signed cert to the client's trust store. For missing intermediates, add them to the server's chain. Verify with: peep -v <host>",
+			DocRef:   "peep docs troubleshooting",
 		})
 	}
 

@@ -24,7 +24,8 @@ var (
 	flagJSON     bool
 	flagNoColor  bool
 	flagInsecure bool
-	flagVerbose  int // 0 = default, 1 = -v, 2 = -vv/--verbose
+	flagVerbose  int  // 0 = default, 1 = -v, 2 = -vv/--verbose
+	flagExplain  bool // --explain
 )
 
 var rootCmd = &cobra.Command{
@@ -41,6 +42,7 @@ Examples:
   peep example.com              Quick check (header + chain)
   peep -v example.com           Show full cert details
   peep -vv example.com          Full details + PEM encoded certs
+  peep --explain example.com    Explain all issues with fixes & doc refs
   peep scan example.com         Deep scan with cipher enumeration
   peep --proto smtp server:2525 Force SMTP protocol on non-standard port`,
 	Args: cobra.MaximumNArgs(1),
@@ -58,6 +60,7 @@ func init() {
 	rootCmd.PersistentFlags().BoolVar(&flagInsecure, "insecure", false, "Skip system trust store verification")
 	rootCmd.PersistentFlags().CountVarP(&flagVerbose, "v", "v", "Verbosity: -v for cert details, -vv for PEM certs")
 	rootCmd.PersistentFlags().BoolVar(&flagVV, "verbose", false, "Max verbosity (same as -vv)")
+	rootCmd.PersistentFlags().BoolVar(&flagExplain, "explain", false, "Explain each issue with fix recommendations and doc references")
 }
 
 // Execute runs the root command.
@@ -210,13 +213,15 @@ func renderReport(report *analyzer.DiagnosticReport) {
 
 	// Always: Warnings
 	if len(report.Warnings) > 0 {
-		fmt.Println(ui.RenderWarnings(report.Warnings))
+		fmt.Println(ui.RenderWarnings(report.Warnings, flagExplain))
 	}
 
 	// Scan duration
-	fmt.Println(ui.Theme.MutedStyle.Render(
-		fmt.Sprintf("  Scan completed in %s", report.ScanDuration.Round(time.Millisecond)),
-	))
+	duration := fmt.Sprintf("  Scan completed in %s", report.ScanDuration.Round(time.Millisecond))
+	if flagExplain {
+		duration += ui.Theme.MutedStyle.Render(fmt.Sprintf(" — %s", ui.RandomScanComment()))
+	}
+	fmt.Println(ui.Theme.MutedStyle.Render(duration))
 }
 
 func renderJSON(report *analyzer.DiagnosticReport) error {
