@@ -171,9 +171,6 @@ func renderReport(report *analyzer.DiagnosticReport) {
 	// Chain diagram
 	fmt.Println(ui.RenderChainDiagram(report.Chain))
 
-	// Handshake details
-	fmt.Println(ui.RenderHandshakeCard(report.Handshake))
-
 	// Warnings with --why
 	if len(report.Warnings) > 0 {
 		fmt.Println(ui.RenderWarnings(report.Warnings))
