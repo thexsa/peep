@@ -40,6 +40,8 @@ var portProtocolMap = map[string]string{
 	"995":  "tls",   // POP3S
 	"5986": "tls",   // WinRM HTTPS
 	"853":  "tls",   // DNS over TLS
+	"21":   "ftp",   // FTP STARTTLS (AUTH TLS)
+	"990":  "tls",   // FTPS (implicit TLS)
 }
 
 // protocolNames maps probe types to human-readable names.
@@ -48,6 +50,7 @@ var protocolNames = map[string]string{
 	"smtp": "SMTP/STARTTLS",
 	"rdp":  "RDP (X.224 → TLS)",
 	"ldap": "LDAP/STARTTLS",
+	"ftp":  "FTP/STARTTLS (AUTH TLS)",
 }
 
 // Probe connects to the target and extracts TLS information using the
@@ -78,6 +81,8 @@ func Probe(opts ProbeOptions) (*ProbeResult, error) {
 		state, notes, err = probeRDP(target, opts.Host, opts.Timeout)
 	case "ldap":
 		state, notes, err = probeLDAPStartTLS(target, opts.Host, opts.Timeout)
+	case "ftp":
+		state, notes, err = probeFTPStartTLS(target, opts.Host, opts.Timeout)
 	default:
 		// Default: try direct TLS
 		state, notes, err = probeDirectTLS(target, opts.Host, opts.Timeout)
@@ -132,5 +137,6 @@ func ProtocolList() map[string]string {
 		"smtp": "SMTP STARTTLS upgrade (ports 25, 587)",
 		"rdp":  "RDP X.224 negotiation followed by TLS (port 3389)",
 		"ldap": "LDAP STARTTLS extended operation (port 389)",
+		"ftp":  "FTP AUTH TLS/SSL upgrade (port 21)",
 	}
 }

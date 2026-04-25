@@ -1,6 +1,6 @@
 VERSION := 0.1.0
 BINARY  := peep
-LDFLAGS := -s -w -X github.com/peep-tls/peep/internal/cli.Version=$(VERSION)
+LDFLAGS := -s -w -X github.com/thexsa/peep/internal/cli.Version=$(VERSION)
 
 .PHONY: build build-all test clean
 
