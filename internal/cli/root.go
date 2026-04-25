@@ -47,7 +47,6 @@ Examples:
 	RunE: runPeep,
 }
 
-var flagV bool  // -v
 var flagVV bool // --verbose
 
 func init() {
@@ -57,8 +56,8 @@ func init() {
 	rootCmd.PersistentFlags().BoolVar(&flagJSON, "json", false, "Output as JSON (for scripting)")
 	rootCmd.PersistentFlags().BoolVar(&flagNoColor, "no-color", false, "Disable color output")
 	rootCmd.PersistentFlags().BoolVar(&flagInsecure, "insecure", false, "Skip system trust store verification")
-	rootCmd.PersistentFlags().BoolVarP(&flagV, "v", "v", false, "Show detailed cert info (leaf, issuing, root)")
-	rootCmd.PersistentFlags().BoolVar(&flagVV, "verbose", false, "Show full details + PEM encoded certs (-vv)")
+	rootCmd.PersistentFlags().CountVarP(&flagVerbose, "v", "v", "Verbosity: -v for cert details, -vv for PEM certs")
+	rootCmd.PersistentFlags().BoolVar(&flagVV, "verbose", false, "Max verbosity (same as -vv)")
 }
 
 // Execute runs the root command.
@@ -70,10 +69,10 @@ func resolveVerbosity() int {
 	if flagVV {
 		return 2
 	}
-	if flagV {
-		return 1
+	if flagVerbose > 2 {
+		return 2
 	}
-	return 0
+	return flagVerbose
 }
 
 func runPeep(cmd *cobra.Command, args []string) error {
@@ -186,7 +185,10 @@ func renderReport(report *analyzer.DiagnosticReport) {
 		}
 	}
 
-	// -vv: Show PEM encoded certs
+	// Always: Chain diagram (with serial/fingerprint)
+	fmt.Println(ui.RenderChainDiagram(report.Chain))
+
+	// -vv/--verbose: Show PEM encoded certs (after chain)
 	if flagVerbose >= 2 {
 		for _, cert := range report.Chain.Certificates {
 			name := cert.CommonName
@@ -205,9 +207,6 @@ func renderReport(report *analyzer.DiagnosticReport) {
 			fmt.Println(ui.ApplyBorder(lines, ui.CardBorder))
 		}
 	}
-
-	// Always: Chain diagram (with serial/fingerprint)
-	fmt.Println(ui.RenderChainDiagram(report.Chain))
 
 	// Always: Warnings
 	if len(report.Warnings) > 0 {

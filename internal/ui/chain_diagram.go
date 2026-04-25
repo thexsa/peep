@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"math/rand"
 	"strings"
 
 	"github.com/thexsa/peep/internal/analyzer"
@@ -56,10 +57,12 @@ func RenderChainDiagram(chain analyzer.ChainAnalysis) string {
 	if chain.TrustStoreVerified {
 		lines = append(lines, "")
 		lines = append(lines, Theme.SuccessStyle.Render("[PASS] Chain verified against system trust store"))
+		lines = append(lines, Theme.MutedStyle.Render(fmt.Sprintf("       %s", chainVerifiedSaying())))
 	} else if chain.VerificationError != "" {
 		lines = append(lines, "")
 		lines = append(lines, Theme.ErrorStyle.Render("[FAIL] Trust store verification failed"))
 		lines = append(lines, Theme.MutedStyle.Render(fmt.Sprintf("       %s", chain.VerificationError)))
+		lines = append(lines, Theme.MutedStyle.Render(fmt.Sprintf("       %s", chainFailedSaying())))
 	}
 
 	return ApplyBorder(lines, SectionBorder) + "\n"
@@ -103,9 +106,6 @@ func renderChainNode(cert analyzer.CertAnalysis, index int, isLast bool, total i
 	// SANs for leaf
 	if cert.Role == analyzer.RoleLeaf && len(cert.DNSNames) > 0 {
 		sans := strings.Join(cert.DNSNames, ", ")
-		if len(sans) > 60 {
-			sans = sans[:57] + "..."
-		}
 		lines = append(lines, fmt.Sprintf("%sCovers: %s", prefix, Theme.MutedStyle.Render(sans)))
 	}
 
@@ -143,4 +143,36 @@ func formatChainExpiry(cert analyzer.CertAnalysis) string {
 		return Theme.WarningStyle.Render(fmt.Sprintf("%d days (%s)", cert.DaysRemaining, expiryDate))
 	}
 	return Theme.ErrorStyle.Render(fmt.Sprintf("%d days (%s)", cert.DaysRemaining, expiryDate))
+}
+
+var chainVerifiedSayings = []string{
+	"The trust store gave this a thumbs up. You may proceed with your life.",
+	"Verified. The OS trusts this chain. That's more than I can say for most things.",
+	"System trust store says this checks out. For once, something works.",
+	"All good. The chain is trusted. Now go worry about something else.",
+	"Clean chain. The kind of result that makes you wonder what ELSE is broken.",
+	"Trust store verification passed. Somebody actually configured this correctly.",
+	"The chain is solid. Your OS agrees. Browsers agree. I reluctantly agree.",
+	"Verified against the system trust store. No drama here.",
+	"The chain checks out. If everything else worked this well, I'd be unemployed.",
+	"Trusted. The PKI gods smile upon this chain.",
+}
+
+var chainFailedSayings = []string{
+	"The trust store wants nothing to do with this chain. Can you blame it?",
+	"Verification failed. Your users are seeing a big scary warning right now.",
+	"The system trust store rejected this. Hard no. Fix the chain.",
+	"Failed. The OS looked at this chain and said 'absolutely not.'",
+	"Trust store says no. Browsers say no. I say no. Everybody says no.",
+	"This chain couldn't pass verification at a lemonade stand.",
+	"Untrusted. Your users are seeing a full-page error. You're welcome for the heads up.",
+	"The chain is broken. Not 'kinda broken' — actually, completely broken.",
+}
+
+func chainVerifiedSaying() string {
+	return chainVerifiedSayings[rand.Intn(len(chainVerifiedSayings))]
+}
+
+func chainFailedSaying() string {
+	return chainFailedSayings[rand.Intn(len(chainFailedSayings))]
 }
