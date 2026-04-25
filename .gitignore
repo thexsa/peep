@@ -1,0 +1,25 @@
+# Binaries (root-level build output only)
+/peep
+/peep-*
+*.exe
+dist/
+
+# Go
+vendor/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Debug
+debug
+*.test
+*.out
+*.prof
