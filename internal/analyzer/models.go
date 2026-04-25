@@ -137,15 +137,16 @@ type CertAnalysis struct {
 
 // ChainAnalysis holds the assessment of the entire certificate chain.
 type ChainAnalysis struct {
-	Certificates       []CertAnalysis
-	ChainLength        int
-	HasMissingIntermediate bool
+	Certificates                []CertAnalysis
+	ChainLength                 int
+	HasMissingIntermediate      bool
 	HasUnnecessaryRoot          bool
 	LeafOnlyMissingIntermediate bool // Leaf only, and issuer is NOT a root CA
-	ChainOrderCorrect          bool
-	TrustStoreVerified         bool
+	NoIssuingCAInResponse       bool // Server didn't include ANY issuing CA cert
+	ChainOrderCorrect           bool
+	TrustStoreVerified          bool
 	VerificationError           string
-	OverallGrade               HealthStatus
+	OverallGrade                HealthStatus
 }
 
 // DiagnosticReport is the complete output of a peep scan.

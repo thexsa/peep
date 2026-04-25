@@ -167,6 +167,20 @@ func checkCert(cert analyzer.CertAnalysis) []analyzer.Warning {
 func checkChain(chain analyzer.ChainAnalysis) []analyzer.Warning {
 	var w []analyzer.Warning
 
+	// ALWAYS call out when server didn't include the issuing CA
+	if chain.NoIssuingCAInResponse {
+		w = append(w, analyzer.Warning{
+			Code:     "CHAIN_NO_ISSUING_CA",
+			Severity: analyzer.WrittenInCrayon,
+			Title:    "No Issuing CA in Server Response",
+			Detail:   "The server did not include the issuing CA certificate in its TLS response.",
+			Why:      pick(noIssuingCASayings),
+			Explain:  "During the TLS handshake, the server is expected to send the complete certificate chain: the leaf cert plus any intermediate CA certs that signed it. This server sent only the leaf certificate — no issuing CA was included. Without the issuing CA, clients cannot build a trust path to a root CA. Some browsers may work (they can fetch intermediates via AIA), but most applications, APIs, curl, mobile apps, and IoT devices will fail with a trust error.",
+			Fix:      "Add the issuing CA (intermediate) certificate to the server's cert chain. Concatenate them: cat leaf.crt intermediate.crt > fullchain.crt. In nginx: ssl_certificate should contain the full chain. In Apache: use SSLCertificateChainFile. If this is a self-signed cert, either replace it with a CA-signed cert or distribute it to all client trust stores.",
+			DocRef:   "peep docs chain",
+		})
+	}
+
 	if chain.HasMissingIntermediate {
 		w = append(w, analyzer.Warning{
 			Code:     "CHAIN_MISSING_INTERMEDIATE",
@@ -369,6 +383,19 @@ var hostnameMismatchSayings = []string{
 	"The cert and the hostname aren't even close. Did anyone test this?",
 	"Someone installed a cert for the wrong domain. In production. Incredible.",
 	"Check the SAN list on the cert. Then check the hostname. Then facepalm.",
+}
+
+var noIssuingCASayings = []string{
+	"The server didn't bother including the issuing CA. Clients everywhere are confused.",
+	"No issuing CA in the response. The server just threw the leaf cert out there and hoped for the best.",
+	"The issuing CA is MIA. Missing in action. Missing in the TLS handshake. Missing from this chain.",
+	"You sent the leaf cert and... that's it? Where's the rest of the chain?",
+	"The server's response is missing the issuing CA. Most clients will choke on this.",
+	"No intermediate CA in the handshake. Half your clients can't verify this chain.",
+	"The issuing CA wasn't included. It's like submitting a form with no signature — rejected.",
+	"Server sent one cert. ONE. The issuing CA that signed it? Nowhere to be found.",
+	"The chain starts and ends with the leaf. Where's the CA that vouched for it?",
+	"Missing issuing CA. The server basically said 'figure it out yourself.' Clients can't.",
 }
 
 var missingIntermediateSayings = []string{

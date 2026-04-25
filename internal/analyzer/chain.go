@@ -21,6 +21,13 @@ func AnalyzeChain(state *tls.ConnectionState, targetHost string, skipVerify bool
 	analysis.HasUnnecessaryRoot = checkUnnecessaryRoot(certs)
 	analysis.LeafOnlyMissingIntermediate = checkLeafOnlyMissingIntermediate(certs)
 
+	// NoIssuingCAInResponse: true if the server sent only the leaf cert
+	// (regardless of whether it's self-signed) or if intermediates are missing.
+	// This means the server's TLS response contained no issuing CA certificate.
+	if len(certs) == 1 || analysis.HasMissingIntermediate {
+		analysis.NoIssuingCAInResponse = true
+	}
+
 	if !skipVerify && totalCerts > 0 {
 		analysis.TrustStoreVerified, analysis.VerificationError = verifyTrustStore(certs, targetHost)
 	}

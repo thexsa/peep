@@ -30,7 +30,7 @@ func RenderSummaryHeader(host, port, ip, protocol string, report *analyzer.Diagn
 	lines = append(lines, Theme.SuccessStyle.Render(fmt.Sprintf("  %s handshake completed successfully", protocol)))
 
 	// Prominent callout: server didn't include issuing CA
-	if report.Chain.HasMissingIntermediate || report.Chain.LeafOnlyMissingIntermediate {
+	if report.Chain.NoIssuingCAInResponse {
 		lines = append(lines, "")
 		lines = append(lines, Theme.ErrorStyle.Render("  ⚠ SERVER DID NOT INCLUDE THE ISSUING CA IN ITS RESPONSE"))
 		lines = append(lines, Theme.MutedStyle.Render("    The intermediate certificate is missing from the server's TLS handshake."))

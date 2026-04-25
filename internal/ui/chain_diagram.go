@@ -27,6 +27,13 @@ func RenderChainDiagram(chain analyzer.ChainAnalysis) string {
 	}
 
 	// Chain-level notes
+	if chain.NoIssuingCAInResponse {
+		lines = append(lines, "")
+		lines = append(lines, Theme.ErrorStyle.Render("[FAIL] No Issuing CA in server response"))
+		lines = append(lines, Theme.MutedStyle.Render("       The server did not include the issuing CA certificate in its TLS handshake."))
+		lines = append(lines, Theme.MutedStyle.Render("       Clients cannot build a trust path without it. This must be fixed."))
+	}
+
 	if chain.HasMissingIntermediate {
 		lines = append(lines, "")
 		lines = append(lines, Theme.ErrorStyle.Render("[FAIL] Missing intermediate certificate(s)"))
