@@ -122,11 +122,11 @@ func formatExpiry(cert analyzer.CertAnalysis) string {
 	expiryDate := cert.NotAfter.Format("Jan 02, 2006")
 	comment := RandomExpiryComment(cert.DaysRemaining)
 
-	if cert.DaysRemaining > 90 {
+	if cert.DaysRemaining > 30 {
 		return Theme.SuccessStyle.Render(fmt.Sprintf("%d days (%s)", cert.DaysRemaining, expiryDate)) +
 			Theme.MutedStyle.Render(fmt.Sprintf(" — %s", comment))
 	}
-	if cert.DaysRemaining > 30 {
+	if cert.DaysRemaining > 14 {
 		return Theme.WarningStyle.Render(fmt.Sprintf("%d days (%s)", cert.DaysRemaining, expiryDate)) +
 			Theme.MutedStyle.Render(fmt.Sprintf(" — %s", comment))
 	}

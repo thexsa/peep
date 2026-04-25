@@ -111,10 +111,10 @@ func gradeExpiry(daysLeft int, isExpired bool) HealthStatus {
 	if isExpired {
 		return WrittenInCrayon
 	}
-	if daysLeft <= 30 {
+	if daysLeft <= 14 {
 		return WrittenInCrayon
 	}
-	if daysLeft <= 90 {
+	if daysLeft <= 30 {
 		return MallCopCredentials
 	}
 	return MainCharacterEnergy

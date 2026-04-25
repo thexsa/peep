@@ -56,10 +56,10 @@ func RandomExpiryComment(daysLeft int) string {
 	if daysLeft > 365 {
 		return longExpirySayings[rand.Intn(len(longExpirySayings))]
 	}
-	if daysLeft > 90 {
+	if daysLeft > 30 {
 		return mediumExpirySayings[rand.Intn(len(mediumExpirySayings))]
 	}
-	if daysLeft > 30 {
+	if daysLeft > 14 {
 		return shortExpirySayings[rand.Intn(len(shortExpirySayings))]
 	}
 	return criticalExpirySayings[rand.Intn(len(criticalExpirySayings))]

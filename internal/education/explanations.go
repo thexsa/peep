@@ -71,7 +71,7 @@ func checkCert(cert analyzer.CertAnalysis) []analyzer.Warning {
 			Detail:   "This certificate expired " + pluralDays(-cert.DaysRemaining) + " ago.",
 			Why:      pick(certExpiredSayings),
 		})
-	} else if cert.DaysRemaining <= 30 {
+	} else if cert.DaysRemaining <= 14 {
 		w = append(w, analyzer.Warning{
 			Code:     "CERT_EXPIRING_SOON",
 			Severity: analyzer.WrittenInCrayon,
@@ -79,7 +79,7 @@ func checkCert(cert analyzer.CertAnalysis) []analyzer.Warning {
 			Detail:   "This certificate expires in " + pluralDays(cert.DaysRemaining) + ".",
 			Why:      pick(certExpiringSoonSayings),
 		})
-	} else if cert.DaysRemaining <= 90 {
+	} else if cert.DaysRemaining <= 30 {
 		w = append(w, analyzer.Warning{
 			Code:     "CERT_EXPIRING",
 			Severity: analyzer.MallCopCredentials,
