@@ -94,7 +94,7 @@ func RenderCertCard(cert analyzer.CertAnalysis) string {
 		kvLines = append(kvLines, renderKV("Flags", strings.Join(flags, ", ")))
 	}
 
-	content := lipgloss.JoinVertical(lipgloss.Left, append([]string{header, ""}, kvLines...)...)
+	content := lipgloss.JoinVertical(lipgloss.Left, append([]string{header}, kvLines...)...)
 	return Theme.CardStyle.Render(content)
 }
 
