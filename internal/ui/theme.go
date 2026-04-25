@@ -1,6 +1,8 @@
 package ui
 
 import (
+	"strings"
+
 	"github.com/charmbracelet/lipgloss"
 )
 
@@ -96,4 +98,32 @@ var Theme = struct {
 
 	ValueStyle: lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#E2E8F0")),
+}
+
+// Manual border prefixes — avoids lipgloss right-padding that causes
+// misalignment when terminal width is narrower than the longest line.
+var (
+	// CardBorder uses a thin border for cert cards
+	CardBorder = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#475569")).
+			Render("│") + "  "
+
+	// SectionBorder uses a thick border for sections (chain, handshake, findings)
+	SectionBorder = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#64748B")).
+			Render("┃") + "  "
+
+	// HeaderBorder uses a thick primary-colored border for the header
+	HeaderBorder = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#818CF8")).
+			Render("┃") + "  "
+)
+
+// ApplyBorder prepends a border prefix to each line and joins them.
+func ApplyBorder(lines []string, prefix string) string {
+	var bordered []string
+	for _, line := range lines {
+		bordered = append(bordered, prefix+line)
+	}
+	return strings.Join(bordered, "\n")
 }

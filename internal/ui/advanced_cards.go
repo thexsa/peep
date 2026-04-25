@@ -2,9 +2,7 @@ package ui
 
 import (
 	"fmt"
-	"strings"
 
-	"github.com/charmbracelet/lipgloss"
 	"github.com/thexsa/peep/internal/analyzer"
 )
 
@@ -48,8 +46,7 @@ func RenderOCSPResult(result analyzer.OCSPResult) string {
 		lines = append(lines, renderKV("Next Update", result.NextUpdate.Format("Jan 02, 2006 15:04:05 MST")))
 	}
 
-	content := lipgloss.JoinVertical(lipgloss.Left, lines...)
-	return Theme.SectionStyle.Render(content) + "\n"
+	return ApplyBorder(lines, SectionBorder) + "\n"
 }
 
 // RenderCTLogResult renders the Certificate Transparency log check.
@@ -73,8 +70,7 @@ func RenderCTLogResult(result analyzer.CTLogResult) string {
 		lines = append(lines, renderKV("Status", Theme.WarningStyle.Render("Not in CT logs — either brand new or someone's hiding something")))
 	}
 
-	content := lipgloss.JoinVertical(lipgloss.Left, lines...)
-	return Theme.SectionStyle.Render(content) + "\n"
+	return ApplyBorder(lines, SectionBorder) + "\n"
 }
 
 // RenderCipherEnum renders the cipher suite enumeration results.
@@ -142,6 +138,5 @@ func RenderCipherEnum(result analyzer.CipherEnumResult) string {
 		lines = append(lines, Theme.SuccessStyle.Render("All supported cipher suites are secure."))
 	}
 
-	content := strings.Join(lines, "\n")
-	return Theme.SectionStyle.Render(content) + "\n"
+	return ApplyBorder(lines, SectionBorder) + "\n"
 }

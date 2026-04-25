@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
 	"github.com/thexsa/peep/internal/analyzer"
 )
 
@@ -63,8 +62,7 @@ func RenderChainDiagram(chain analyzer.ChainAnalysis) string {
 		lines = append(lines, Theme.MutedStyle.Render(fmt.Sprintf("       %s", chain.VerificationError)))
 	}
 
-	content := lipgloss.JoinVertical(lipgloss.Left, lines...)
-	return Theme.SectionStyle.Render(content) + "\n"
+	return ApplyBorder(lines, SectionBorder) + "\n"
 }
 
 // renderChainNode renders a single node in the chain tree.

@@ -3,7 +3,6 @@ package ui
 import (
 	"fmt"
 
-	"github.com/charmbracelet/lipgloss"
 	"github.com/thexsa/peep/internal/analyzer"
 )
 
@@ -30,6 +29,5 @@ func RenderWarnings(warnings []analyzer.Warning) string {
 		lines = append(lines, "")
 	}
 
-	content := lipgloss.JoinVertical(lipgloss.Left, lines...)
-	return Theme.SectionStyle.Render(content) + "\n"
+	return ApplyBorder(lines, SectionBorder) + "\n"
 }

@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
 	"github.com/thexsa/peep/internal/analyzer"
 )
 
@@ -17,8 +16,7 @@ func RenderBanner(host, port, ip, protocol string) string {
 		Theme.SuccessStyle.Render(fmt.Sprintf("  %s handshake completed successfully", protocol)),
 	}
 
-	content := lipgloss.JoinVertical(lipgloss.Left, lines...)
-	return Theme.HeaderBoxStyle.Render(content)
+	return ApplyBorder(lines, HeaderBorder)
 }
 
 // RenderSummaryHeader renders the banner + findings + verdict in a single header block.
@@ -56,8 +54,7 @@ func RenderSummaryHeader(host, port, ip, protocol string, report *analyzer.Diagn
 	lines = append(lines, fmt.Sprintf("  %s TLS: %s", vGrade, report.Handshake.TLSVersion))
 	lines = append(lines, fmt.Sprintf("  %s Cipher: %s", cGrade, report.Handshake.CipherSuite))
 
-	content := lipgloss.JoinVertical(lipgloss.Left, lines...)
-	return Theme.HeaderBoxStyle.Render(content)
+	return ApplyBorder(lines, HeaderBorder)
 }
 
 // RenderVersion displays the version banner.
@@ -67,5 +64,5 @@ func RenderVersion(version string) string {
 	built := Theme.MutedStyle.Render("Built with pure Go — no OpenSSL required.")
 
 	content := strings.Join([]string{logo, tagline, built}, "\n")
-	return Theme.HeaderBoxStyle.Render(content)
+	return ApplyBorder([]string{content}, HeaderBorder)
 }

@@ -4,9 +4,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
 	"github.com/thexsa/peep/internal/analyzer"
 )
+
+
 
 // RenderCertCard renders a detailed certificate info card.
 func RenderCertCard(cert analyzer.CertAnalysis) string {
@@ -18,20 +19,21 @@ func RenderCertCard(cert analyzer.CertAnalysis) string {
 	// Header line
 	header := Theme.BoldStyle.Render(fmt.Sprintf("%s  %s", cert.Role, name))
 
-	var kvLines []string
+	var lines []string
+	lines = append(lines, header)
 
-	kvLines = append(kvLines, renderKV("Subject", cert.Subject))
-	kvLines = append(kvLines, renderKV("Issuer", cert.Issuer))
+	lines = append(lines, renderKV("Subject", cert.Subject))
+	lines = append(lines, renderKV("Issuer", cert.Issuer))
 
 	if cert.Organization != "" {
-		kvLines = append(kvLines, renderKV("Organization", cert.Organization))
+		lines = append(lines, renderKV("Organization", cert.Organization))
 	}
 
 	// Role explanation
-	kvLines = append(kvLines, renderKV("Role", Theme.MutedStyle.Render(cert.Role.RoleExplanation())))
+	lines = append(lines, renderKV("Role", Theme.MutedStyle.Render(cert.Role.RoleExplanation())))
 
 	// Status
-	kvLines = append(kvLines, renderKV("Status", StatusBadge(cert.OverallGrade)))
+	lines = append(lines, renderKV("Status", StatusBadge(cert.OverallGrade)))
 
 	// SANs
 	if len(cert.DNSNames) > 0 {
@@ -39,45 +41,45 @@ func RenderCertCard(cert analyzer.CertAnalysis) string {
 		if len(sans) > 80 {
 			sans = sans[:77] + "..."
 		}
-		kvLines = append(kvLines, renderKV("DNS Names", sans))
+		lines = append(lines, renderKV("DNS Names", sans))
 	}
 	if len(cert.IPAddresses) > 0 {
-		kvLines = append(kvLines, renderKV("IP SANs", strings.Join(cert.IPAddresses, ", ")))
+		lines = append(lines, renderKV("IP SANs", strings.Join(cert.IPAddresses, ", ")))
 	}
 
 	// Hostname match for leaf
 	if cert.Role == analyzer.RoleLeaf {
 		if cert.HostnameMatch {
-			kvLines = append(kvLines, renderKV("Host Match", Theme.SuccessStyle.Render("Yes")))
+			lines = append(lines, renderKV("Host Match", Theme.SuccessStyle.Render("Yes")))
 		} else {
-			kvLines = append(kvLines, renderKV("Host Match", Theme.ErrorStyle.Render("NO — wrong cert installed")))
+			lines = append(lines, renderKV("Host Match", Theme.ErrorStyle.Render("NO — wrong cert installed")))
 		}
 	}
 
 	// Dates
-	kvLines = append(kvLines, renderKV("Not Before", cert.NotBefore.Format("Jan 02, 2006 15:04:05 MST")))
-	kvLines = append(kvLines, renderKV("Not After", cert.NotAfter.Format("Jan 02, 2006 15:04:05 MST")))
-	kvLines = append(kvLines, renderKV("Days Left", formatExpiry(cert)))
+	lines = append(lines, renderKV("Not Before", cert.NotBefore.Format("Jan 02, 2006 15:04:05 MST")))
+	lines = append(lines, renderKV("Not After", cert.NotAfter.Format("Jan 02, 2006 15:04:05 MST")))
+	lines = append(lines, renderKV("Days Left", formatExpiry(cert)))
 
 	// Key info
 	keyInfo := cert.KeyType
 	if cert.KeyBits > 0 {
 		keyInfo = fmt.Sprintf("%s (%d bits)", cert.KeyType, cert.KeyBits)
 	}
-	kvLines = append(kvLines, renderKV("Key", fmt.Sprintf("%s  %s", keyInfo, StatusIcon(cert.KeyGrade))))
+	lines = append(lines, renderKV("Key", fmt.Sprintf("%s  %s", keyInfo, StatusIcon(cert.KeyGrade))))
 
 	// Signature
-	kvLines = append(kvLines, renderKV("Signature", fmt.Sprintf("%s  %s", cert.SignatureAlg, StatusIcon(cert.SignatureGrade))))
+	lines = append(lines, renderKV("Signature", fmt.Sprintf("%s  %s", cert.SignatureAlg, StatusIcon(cert.SignatureGrade))))
 
 	// Serial
-	kvLines = append(kvLines, renderKV("Serial", Theme.MutedStyle.Render(cert.SerialNumber)))
+	lines = append(lines, renderKV("Serial", Theme.MutedStyle.Render(cert.SerialNumber)))
 
 	// Fingerprint
 	fp := cert.Fingerprint
 	if len(fp) > 40 {
 		fp = formatFingerprint(fp)
 	}
-	kvLines = append(kvLines, renderKV("SHA-256", Theme.MutedStyle.Render(fp)))
+	lines = append(lines, renderKV("SHA-256", Theme.MutedStyle.Render(fp)))
 
 	// Flags
 	var flags []string
@@ -91,11 +93,10 @@ func RenderCertCard(cert analyzer.CertAnalysis) string {
 		flags = append(flags, "CA")
 	}
 	if len(flags) > 0 {
-		kvLines = append(kvLines, renderKV("Flags", strings.Join(flags, ", ")))
+		lines = append(lines, renderKV("Flags", strings.Join(flags, ", ")))
 	}
 
-	content := lipgloss.JoinVertical(lipgloss.Left, append([]string{header}, kvLines...)...)
-	return Theme.CardStyle.Render(content)
+	return ApplyBorder(lines, CardBorder)
 }
 
 func renderKV(key, value string) string {

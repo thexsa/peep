@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"math/rand"
 
-	"github.com/charmbracelet/lipgloss"
 	"github.com/thexsa/peep/internal/analyzer"
 )
 
@@ -28,8 +27,7 @@ func RenderHandshakeCard(hs analyzer.HandshakeAnalysis) string {
 	cipherGrade := StatusIcon(hs.CipherGrade)
 	lines = append(lines, renderKV("Cipher Suite", fmt.Sprintf("%s  %s", hs.CipherSuite, cipherGrade)))
 
-	content := lipgloss.JoinVertical(lipgloss.Left, lines...)
-	return Theme.SectionStyle.Render(content) + "\n"
+	return ApplyBorder(lines, SectionBorder) + "\n"
 }
 
 func tlsVersionComment(version string) string {
