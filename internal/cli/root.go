@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/pem"
 	"fmt"
 	"net"
 	"os"
@@ -23,6 +24,7 @@ var (
 	flagJSON     bool
 	flagNoColor  bool
 	flagInsecure bool
+	flagVerbose  int // 0 = default, 1 = -v, 2 = -vv/--verbose
 )
 
 var rootCmd = &cobra.Command{
@@ -36,15 +38,17 @@ Smart protocol detection: peep automatically handles HTTPS, SMTP,
 RDP, LDAP, FTP, and more. Just give it a host and port.
 
 Examples:
-  peep example.com              Check HTTPS (port 443)
-  peep example.com:8443         Check a custom HTTPS port
-  peep mail.example.com:587     Check SMTP (auto-detects STARTTLS)
-  peep rdp.example.com:3389     Check RDP (auto-handles X.224)
+  peep example.com              Quick check (header + chain)
+  peep -v example.com           Show full cert details
+  peep -vv example.com          Full details + PEM encoded certs
   peep scan example.com         Deep scan with cipher enumeration
   peep --proto smtp server:2525 Force SMTP protocol on non-standard port`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runPeep,
 }
+
+var flagV bool  // -v
+var flagVV bool // --verbose
 
 func init() {
 	rootCmd.PersistentFlags().StringVarP(&flagPort, "port", "p", "", "Override port (default: auto-detect)")
@@ -53,6 +57,8 @@ func init() {
 	rootCmd.PersistentFlags().BoolVar(&flagJSON, "json", false, "Output as JSON (for scripting)")
 	rootCmd.PersistentFlags().BoolVar(&flagNoColor, "no-color", false, "Disable color output")
 	rootCmd.PersistentFlags().BoolVar(&flagInsecure, "insecure", false, "Skip system trust store verification")
+	rootCmd.PersistentFlags().BoolVarP(&flagV, "v", "v", false, "Show detailed cert info (leaf, issuing, root)")
+	rootCmd.PersistentFlags().BoolVar(&flagVV, "verbose", false, "Show full details + PEM encoded certs (-vv)")
 }
 
 // Execute runs the root command.
@@ -60,10 +66,22 @@ func Execute() error {
 	return rootCmd.Execute()
 }
 
+func resolveVerbosity() int {
+	if flagVV {
+		return 2
+	}
+	if flagV {
+		return 1
+	}
+	return 0
+}
+
 func runPeep(cmd *cobra.Command, args []string) error {
 	if len(args) == 0 {
 		return cmd.Help()
 	}
+
+	flagVerbose = resolveVerbosity()
 
 	target := args[0]
 	host, port := parseTarget(target)
@@ -100,11 +118,11 @@ func runPeep(cmd *cobra.Command, args []string) error {
 			Protocol:  result.Protocol,
 			ProbeType: result.ProbeType,
 		},
-		Handshake:    handshake,
-		Chain:        chain,
+		Handshake:     handshake,
+		Chain:         chain,
 		OverallStatus: analyzer.MainCharacterEnergy,
-		ScanDuration: time.Since(startTime),
-		Timestamp:    time.Now(),
+		ScanDuration:  time.Since(startTime),
+		Timestamp:     time.Now(),
 	}
 
 	// Build warnings
@@ -152,7 +170,7 @@ func max(a, b int) int {
 }
 
 func renderReport(report *analyzer.DiagnosticReport) {
-	// Summary header (connection info + verdict + findings at a glance)
+	// Always: Summary header (connection info + verdict + findings at a glance)
 	fmt.Println(ui.RenderSummaryHeader(
 		report.Target.Host,
 		report.Target.Port,
@@ -161,17 +179,37 @@ func renderReport(report *analyzer.DiagnosticReport) {
 		report,
 	))
 
-	// Detailed sections below:
-
-	// Cert details: Leaf → Intermediate → Root
-	for _, cert := range report.Chain.Certificates {
-		fmt.Println(ui.RenderCertCard(cert))
+	// -v and -vv: Show detailed cert cards
+	if flagVerbose >= 1 {
+		for _, cert := range report.Chain.Certificates {
+			fmt.Println(ui.RenderCertCard(cert))
+		}
 	}
 
-	// Chain diagram
+	// -vv: Show PEM encoded certs
+	if flagVerbose >= 2 {
+		for _, cert := range report.Chain.Certificates {
+			name := cert.CommonName
+			if name == "" {
+				name = cert.Subject
+			}
+			pemBlock := &pem.Block{
+				Type:  "CERTIFICATE",
+				Bytes: cert.RawCert.Raw,
+			}
+			pemData := pem.EncodeToMemory(pemBlock)
+
+			var lines []string
+			lines = append(lines, ui.Theme.BoldStyle.Render(fmt.Sprintf("PEM  %s  (%s)", name, cert.Role)))
+			lines = append(lines, ui.Theme.MutedStyle.Render(string(pemData)))
+			fmt.Println(ui.ApplyBorder(lines, ui.CardBorder))
+		}
+	}
+
+	// Always: Chain diagram (with serial/fingerprint)
 	fmt.Println(ui.RenderChainDiagram(report.Chain))
 
-	// Warnings with --why
+	// Always: Warnings
 	if len(report.Warnings) > 0 {
 		fmt.Println(ui.RenderWarnings(report.Warnings))
 	}

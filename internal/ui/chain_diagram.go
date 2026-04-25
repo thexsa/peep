@@ -110,6 +110,14 @@ func renderChainNode(cert analyzer.CertAnalysis, index int, isLast bool, total i
 	}
 
 	lines = append(lines, fmt.Sprintf("%sKey: %s", prefix, Theme.MutedStyle.Render(cert.KeyType)))
+	lines = append(lines, fmt.Sprintf("%sSerial: %s", prefix, Theme.MutedStyle.Render(cert.SerialNumber)))
+
+	// Shortened fingerprint for chain view
+	fp := cert.Fingerprint
+	if len(fp) > 40 {
+		fp = formatFingerprint(fp)
+	}
+	lines = append(lines, fmt.Sprintf("%sSHA-256: %s", prefix, Theme.MutedStyle.Render(fp)))
 
 	// Self-signed / hostname mismatch
 	if cert.IsSelfSigned && cert.Role == analyzer.RoleLeaf {
