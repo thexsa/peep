@@ -166,6 +166,7 @@ func renderReport(report *analyzer.DiagnosticReport) {
 	// Cert details: Leaf → Intermediate → Root
 	for _, cert := range report.Chain.Certificates {
 		fmt.Println(ui.RenderCertCard(cert))
+		fmt.Println()
 	}
 
 	// Chain diagram
