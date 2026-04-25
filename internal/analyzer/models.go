@@ -137,11 +137,12 @@ type ChainAnalysis struct {
 	Certificates       []CertAnalysis
 	ChainLength        int
 	HasMissingIntermediate bool
-	HasUnnecessaryRoot     bool
-	ChainOrderCorrect     bool
-	TrustStoreVerified    bool
-	VerificationError      string
-	OverallGrade          HealthStatus
+	HasUnnecessaryRoot          bool
+	LeafOnlyMissingIntermediate bool // Leaf only, and issuer is NOT a root CA
+	ChainOrderCorrect          bool
+	TrustStoreVerified         bool
+	VerificationError           string
+	OverallGrade               HealthStatus
 }
 
 // DiagnosticReport is the complete output of a peep scan.

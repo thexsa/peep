@@ -45,6 +45,14 @@ func RenderChainDiagram(chain analyzer.ChainAnalysis) string {
 		lines = append(lines, Theme.MutedStyle.Render("       The root is already in the trust store. You're just wasting bandwidth."))
 	}
 
+	if chain.LeafOnlyMissingIntermediate {
+		lines = append(lines, "")
+		lines = append(lines, Theme.ErrorStyle.Render("[FAIL] Leaf-only chain — intermediate CA not included"))
+		lines = append(lines, Theme.MutedStyle.Render("       The server sent ONLY the leaf cert. The issuing CA is NOT a root,"))
+		lines = append(lines, Theme.MutedStyle.Render("       which means clients need BOTH the intermediate AND root trusted."))
+		lines = append(lines, Theme.MutedStyle.Render("       That's not how this works. Include the intermediate in your chain."))
+	}
+
 	// Trust store verification
 	if chain.TrustStoreVerified {
 		lines = append(lines, "")

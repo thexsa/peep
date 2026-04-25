@@ -19,7 +19,6 @@ var (
 	// Flags
 	flagPort     string
 	flagProto    string
-	flagWhy      bool
 	flagTimeout  int
 	flagJSON     bool
 	flagNoColor  bool
@@ -41,7 +40,7 @@ Examples:
   peep example.com:8443         Check a custom HTTPS port
   peep mail.example.com:587     Check SMTP (auto-detects STARTTLS)
   peep rdp.example.com:3389     Check RDP (auto-handles X.224)
-  peep --why example.com        Show explanations for all warnings
+  peep scan example.com         Deep scan with cipher enumeration
   peep --proto smtp server:2525 Force SMTP protocol on non-standard port`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runPeep,
@@ -50,7 +49,6 @@ Examples:
 func init() {
 	rootCmd.PersistentFlags().StringVarP(&flagPort, "port", "p", "", "Override port (default: auto-detect)")
 	rootCmd.PersistentFlags().StringVar(&flagProto, "proto", "", "Force protocol: tls, smtp, rdp, ldap, ftp (default: auto-detect by port)")
-	rootCmd.PersistentFlags().BoolVar(&flagWhy, "why", false, "Show explanations for every warning")
 	rootCmd.PersistentFlags().IntVarP(&flagTimeout, "timeout", "t", 5, "Connection timeout in seconds")
 	rootCmd.PersistentFlags().BoolVar(&flagJSON, "json", false, "Output as JSON (for scripting)")
 	rootCmd.PersistentFlags().BoolVar(&flagNoColor, "no-color", false, "Disable color output")
@@ -178,7 +176,7 @@ func renderReport(report *analyzer.DiagnosticReport) {
 
 	// Warnings with --why
 	if len(report.Warnings) > 0 {
-		fmt.Println(ui.RenderWarnings(report.Warnings, flagWhy))
+		fmt.Println(ui.RenderWarnings(report.Warnings))
 	}
 
 	// Scan duration

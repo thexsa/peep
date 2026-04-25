@@ -7,8 +7,8 @@ import (
 	"github.com/thexsa/peep/internal/analyzer"
 )
 
-// RenderWarnings renders all warnings with optional --why explanations.
-func RenderWarnings(warnings []analyzer.Warning, showWhy bool) string {
+// RenderWarnings renders all warnings with explanations.
+func RenderWarnings(warnings []analyzer.Warning) string {
 	if len(warnings) == 0 {
 		return ""
 	}
@@ -24,7 +24,7 @@ func RenderWarnings(warnings []analyzer.Warning, showWhy bool) string {
 		lines = append(lines, fmt.Sprintf("%s %s", icon, w.Title))
 		lines = append(lines, fmt.Sprintf("     %s", Theme.MutedStyle.Render(w.Detail)))
 
-		if showWhy && w.Why != "" {
+		if w.Why != "" {
 			lines = append(lines, fmt.Sprintf("     %s", Theme.InfoStyle.Render(w.Why)))
 		}
 		lines = append(lines, "")

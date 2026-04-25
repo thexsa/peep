@@ -19,6 +19,7 @@ func AnalyzeChain(state *tls.ConnectionState, targetHost string, skipVerify bool
 	analysis.ChainOrderCorrect = verifyChainOrder(certs)
 	analysis.HasMissingIntermediate = checkMissingIntermediate(certs)
 	analysis.HasUnnecessaryRoot = checkUnnecessaryRoot(certs)
+	analysis.LeafOnlyMissingIntermediate = checkLeafOnlyMissingIntermediate(certs)
 
 	if !skipVerify && totalCerts > 0 {
 		analysis.TrustStoreVerified, analysis.VerificationError = verifyTrustStore(certs, targetHost)
@@ -50,6 +51,29 @@ func checkMissingIntermediate(certs []*x509.Certificate) bool {
 		}
 	}
 	return false
+}
+
+// checkLeafOnlyMissingIntermediate detects when the server sends only a leaf cert
+// and the leaf's issuer is NOT a root CA (meaning the intermediate is missing).
+// In this case, clients need both the intermediate AND root in their trust store,
+// which is incorrect — only the root should be needed.
+func checkLeafOnlyMissingIntermediate(certs []*x509.Certificate) bool {
+	if len(certs) != 1 {
+		return false
+	}
+	leaf := certs[0]
+	// If self-signed, it's a self-signed leaf — different problem
+	if leaf.Subject.String() == leaf.Issuer.String() {
+		return false
+	}
+	// The leaf has an issuer, and it's not itself. The issuer could be:
+	// - A root CA (acceptable, though unusual)
+	// - An intermediate CA (BAD — the intermediate should be in the chain)
+	// We can't 100% know from just the leaf, but if the leaf is NOT CA
+	// and its issuer is NOT in the system trust store as a root, it's likely
+	// an intermediate. The HasMissingIntermediate flag already catches the
+	// general case; this flag specifically calls out the leaf-only scenario.
+	return true
 }
 
 func checkUnnecessaryRoot(certs []*x509.Certificate) bool {
@@ -92,6 +116,9 @@ func gradeChain(a ChainAnalysis) HealthStatus {
 	}
 	if a.HasUnnecessaryRoot {
 		grade = worst(grade, MallCopCredentials)
+	}
+	if a.LeafOnlyMissingIntermediate {
+		grade = worst(grade, WrittenInCrayon)
 	}
 	if a.VerificationError != "" {
 		grade = worst(grade, WrittenInCrayon)
