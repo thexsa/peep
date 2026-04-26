@@ -34,6 +34,7 @@ func RenderChainDiagram(chain analyzer.ChainAnalysis) string {
 		lines = append(lines, "")
 		lines = append(lines, Theme.ErrorStyle.Render("[FAIL] No Issuing CA in server response"))
 		lines = append(lines, wrapBlock("The server did not include the issuing CA certificate in its TLS handshake. Clients cannot build a trust path without it. This must be fixed.", noteIndent, noteW, Theme.MutedStyle)...)
+		lines = append(lines, wrapBlock(noIssuingCAChainSaying(), noteIndent, noteW, Theme.MutedStyle)...)
 	}
 
 	if chain.HasMissingIntermediate {
@@ -185,6 +186,23 @@ var chainFailedSayings = []string{
 	"This chain couldn't pass verification at a lemonade stand.",
 	"Untrusted. Your users are seeing a full-page error. You're welcome for the heads up.",
 	"The chain is broken. Not 'kinda broken' — actually, completely broken.",
+}
+
+var noIssuingCAChainSayings = []string{
+	"The server said 'here's the leaf, figure out the rest.' Spoiler: clients can't.",
+	"No intermediate. No chain. No trust. No bueno.",
+	"The issuing CA is AWOL. Someone forgot to include it in the cert bundle.",
+	"It's like handing someone a letter with no signature and expecting them to trust it.",
+	"The server sent one cert and called it a day. That's not how PKI works.",
+	"Missing the issuing CA is like a resume with no references — nobody's calling you back.",
+	"The chain has exactly one link. That's not a chain. That's a pendant.",
+	"The trust chain starts and ends with the leaf. That's a trust dot, not a chain.",
+	"Whoever bundled this cert forgot the most important part. The part that makes it work.",
+	"One cert to rule them all? No. One cert to confuse them all.",
+}
+
+func noIssuingCAChainSaying() string {
+	return noIssuingCAChainSayings[rand.Intn(len(noIssuingCAChainSayings))]
 }
 
 func chainVerifiedSaying() string {
