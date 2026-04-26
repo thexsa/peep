@@ -27,49 +27,49 @@ func RenderChainDiagram(chain analyzer.ChainAnalysis) string {
 	}
 
 	// Chain-level notes
+	noteW := ContentWidth(7) // 7 = "       " indent
+	noteIndent := "       "
+
 	if chain.NoIssuingCAInResponse {
 		lines = append(lines, "")
 		lines = append(lines, Theme.ErrorStyle.Render("[FAIL] No Issuing CA in server response"))
-		lines = append(lines, Theme.MutedStyle.Render("       The server did not include the issuing CA certificate in its TLS handshake."))
-		lines = append(lines, Theme.MutedStyle.Render("       Clients cannot build a trust path without it. This must be fixed."))
+		lines = append(lines, wrapBlock("The server did not include the issuing CA certificate in its TLS handshake. Clients cannot build a trust path without it. This must be fixed.", noteIndent, noteW, Theme.MutedStyle)...)
 	}
 
 	if chain.HasMissingIntermediate {
 		lines = append(lines, "")
 		lines = append(lines, Theme.ErrorStyle.Render("[FAIL] Missing intermediate certificate(s)"))
-		lines = append(lines, Theme.MutedStyle.Render("       You forgot the cert that vouches for the leaf. How is this in production?"))
+		lines = append(lines, wrapBlock("You forgot the cert that vouches for the leaf. How is this in production?", noteIndent, noteW, Theme.MutedStyle)...)
 	}
 
 	if !chain.ChainOrderCorrect {
 		lines = append(lines, "")
 		lines = append(lines, Theme.ErrorStyle.Render("[FAIL] Chain order is wrong"))
-		lines = append(lines, Theme.MutedStyle.Render("       The certs are shuffled. It's like reading a book from chapter 5 to chapter 1."))
+		lines = append(lines, wrapBlock("The certs are shuffled. It's like reading a book from chapter 5 to chapter 1.", noteIndent, noteW, Theme.MutedStyle)...)
 	}
 
 	if chain.HasUnnecessaryRoot {
 		lines = append(lines, "")
 		lines = append(lines, Theme.WarningStyle.Render("[WARN] Server is sending the Root CA cert — unnecessary"))
-		lines = append(lines, Theme.MutedStyle.Render("       The root is already in the trust store. You're just wasting bandwidth."))
+		lines = append(lines, wrapBlock("The root is already in the trust store. You're just wasting bandwidth.", noteIndent, noteW, Theme.MutedStyle)...)
 	}
 
 	if chain.LeafOnlyMissingIntermediate {
 		lines = append(lines, "")
 		lines = append(lines, Theme.ErrorStyle.Render("[FAIL] Leaf-only chain — intermediate CA not included"))
-		lines = append(lines, Theme.MutedStyle.Render("       The server sent ONLY the leaf cert. The issuing CA is NOT a root,"))
-		lines = append(lines, Theme.MutedStyle.Render("       which means clients need BOTH the intermediate AND root trusted."))
-		lines = append(lines, Theme.MutedStyle.Render("       That's not how this works. Include the intermediate in your chain."))
+		lines = append(lines, wrapBlock("The server sent ONLY the leaf cert. The issuing CA is NOT a root, which means clients need BOTH the intermediate AND root trusted. That's not how this works. Include the intermediate in your chain.", noteIndent, noteW, Theme.MutedStyle)...)
 	}
 
 	// Trust store verification
 	if chain.TrustStoreVerified {
 		lines = append(lines, "")
 		lines = append(lines, Theme.SuccessStyle.Render("[PASS] Chain verified against system trust store"))
-		lines = append(lines, Theme.MutedStyle.Render(fmt.Sprintf("       %s", chainVerifiedSaying())))
+		lines = append(lines, wrapBlock(chainVerifiedSaying(), noteIndent, noteW, Theme.MutedStyle)...)
 	} else if chain.VerificationError != "" {
 		lines = append(lines, "")
 		lines = append(lines, Theme.ErrorStyle.Render("[FAIL] Trust store verification failed"))
-		lines = append(lines, Theme.MutedStyle.Render(fmt.Sprintf("       %s", chain.VerificationError)))
-		lines = append(lines, Theme.MutedStyle.Render(fmt.Sprintf("       %s", chainFailedSaying())))
+		lines = append(lines, wrapBlock(chain.VerificationError, noteIndent, noteW, Theme.MutedStyle)...)
+		lines = append(lines, wrapBlock(chainFailedSaying(), noteIndent, noteW, Theme.MutedStyle)...)
 	}
 
 	return ApplyBorder(lines, SectionBorder) + "\n"
@@ -113,7 +113,18 @@ func renderChainNode(cert analyzer.CertAnalysis, index int, isLast bool, total i
 	// SANs for leaf
 	if cert.Role == analyzer.RoleLeaf && len(cert.DNSNames) > 0 {
 		sans := strings.Join(cert.DNSNames, ", ")
-		lines = append(lines, fmt.Sprintf("%sCovers: %s", prefix, Theme.MutedStyle.Render(sans)))
+		sanPrefix := prefix + "Covers: "
+		// Build a continuation indent that matches the prefix length
+		contIndent := prefix + "        " // same width as "Covers: "
+		sanW := ContentWidth(len(sanPrefix))
+		wrappedSans := WrapText(sans, contIndent, sanW)
+		for i, sl := range wrappedSans {
+			if i == 0 {
+				lines = append(lines, sanPrefix+Theme.MutedStyle.Render(sl))
+			} else {
+				lines = append(lines, contIndent+Theme.MutedStyle.Render(sl))
+			}
+		}
 	}
 
 	lines = append(lines, fmt.Sprintf("%sKey: %s", prefix, Theme.MutedStyle.Render(cert.KeyType)))

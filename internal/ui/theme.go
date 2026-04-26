@@ -1,9 +1,11 @@
 package ui
 
 import (
+	"os"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"golang.org/x/term"
 )
 
 // Theme holds all the styled renderers for the peep UI.
@@ -119,6 +121,31 @@ var (
 			Render("┃") + "  "
 )
 
+// borderOverhead is the number of characters consumed by the border prefix.
+// "┃  " = 1 (border char) + 2 (spaces) = 3 visible columns, but the
+// ANSI color codes are invisible. We use 4 to be safe.
+const borderOverhead = 4
+
+// TermWidth returns the current terminal width, defaulting to 100 if
+// detection fails.
+func TermWidth() int {
+	w, _, err := term.GetSize(int(os.Stdout.Fd()))
+	if err != nil || w <= 0 {
+		return 100
+	}
+	return w
+}
+
+// ContentWidth returns the usable content width after accounting for
+// the border prefix and a given indent (in spaces).
+func ContentWidth(indent int) int {
+	w := TermWidth() - borderOverhead - indent
+	if w < 40 {
+		return 40
+	}
+	return w
+}
+
 // ApplyBorder prepends a border prefix to each line and joins them.
 func ApplyBorder(lines []string, prefix string) string {
 	var bordered []string
@@ -126,4 +153,64 @@ func ApplyBorder(lines []string, prefix string) string {
 		bordered = append(bordered, prefix+line)
 	}
 	return strings.Join(bordered, "\n")
+}
+
+// WrapText word-wraps a string to fit within maxWidth characters.
+// The first line has no indent. Continuation lines are prefixed with indent.
+func WrapText(text string, indent string, maxWidth int) []string {
+	if maxWidth <= 0 {
+		maxWidth = 76
+	}
+
+	words := strings.Fields(text)
+	if len(words) == 0 {
+		return nil
+	}
+
+	var lines []string
+	currentLine := words[0]
+
+	for _, word := range words[1:] {
+		if len(currentLine)+1+len(word) > maxWidth {
+			lines = append(lines, currentLine)
+			currentLine = word
+		} else {
+			currentLine += " " + word
+		}
+	}
+	lines = append(lines, currentLine)
+
+	return lines
+}
+
+// WrapAndStyle word-wraps text and applies a lipgloss style.
+// Returns lines where the first line has no prefix and continuation
+// lines are indented. Caller is responsible for prepending the indent
+// to the first line.
+func WrapAndStyle(text string, indent string, maxWidth int, style lipgloss.Style) []string {
+	wrapped := WrapText(text, indent, maxWidth)
+	var styled []string
+	for i, line := range wrapped {
+		if i > 0 {
+			styled = append(styled, style.Render(indent+line))
+		} else {
+			styled = append(styled, style.Render(line))
+		}
+	}
+	return styled
+}
+
+// wrapBlock word-wraps text and returns lines where ALL lines
+// (including the first) are prefixed with the indent and styled.
+func wrapBlock(text string, indent string, maxWidth int, style lipgloss.Style) []string {
+	wrapped := WrapText(text, indent, maxWidth)
+	var styled []string
+	for i, line := range wrapped {
+		if i > 0 {
+			styled = append(styled, indent+style.Render(line))
+		} else {
+			styled = append(styled, indent+style.Render(line))
+		}
+	}
+	return styled
 }

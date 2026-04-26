@@ -31,16 +31,18 @@ func RenderSummaryHeader(host, port, ip, protocol string, report *analyzer.Diagn
 
 	// Prominent callout: server didn't include issuing CA
 	if report.Chain.NoIssuingCAInResponse {
+		maxW := ContentWidth(4)
 		lines = append(lines, "")
 		lines = append(lines, Theme.ErrorStyle.Render("  ⚠ SERVER DID NOT INCLUDE THE ISSUING CA IN ITS RESPONSE"))
-		lines = append(lines, Theme.MutedStyle.Render("    The intermediate certificate is missing from the server's TLS handshake."))
-		lines = append(lines, Theme.MutedStyle.Render("    Most clients will fail to verify this chain. This must be fixed."))
+		lines = append(lines, wrapBlock("The intermediate certificate is missing from the server's TLS handshake. Most clients will fail to verify this chain. This must be fixed.", "    ", maxW, Theme.MutedStyle)...)
 	}
 
 	// Quick verdict
+	maxW := ContentWidth(2)
 	lines = append(lines, "")
 	lines = append(lines, fmt.Sprintf("  Verdict: %s", StatusBadge(report.OverallStatus)))
-	lines = append(lines, fmt.Sprintf("  %s", Theme.MutedStyle.Render(RandomSaying(report.OverallStatus))))
+	saying := RandomSaying(report.OverallStatus)
+	lines = append(lines, wrapBlock(saying, "  ", maxW, Theme.MutedStyle)...)
 
 	// Quick findings summary
 	if len(report.Warnings) > 0 {

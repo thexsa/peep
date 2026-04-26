@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -49,6 +50,8 @@ func runDocs(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	fmt.Println(ui.Theme.CardStyle.Render(topic.Content))
+	// Render content line-by-line with manual border (no lipgloss right-padding)
+	contentLines := strings.Split(topic.Content, "\n")
+	fmt.Println(ui.ApplyBorder(contentLines, ui.CardBorder))
 	return nil
 }

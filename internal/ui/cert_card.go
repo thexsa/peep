@@ -30,7 +30,17 @@ func RenderCertCard(cert analyzer.CertAnalysis) string {
 	}
 
 	// Role explanation
-	lines = append(lines, renderKV("Role", Theme.MutedStyle.Render(cert.Role.RoleExplanation())))
+	roleExpl := cert.Role.RoleExplanation()
+	kvIndent := "                    " // 20 chars to align with value column
+	roleW := ContentWidth(20)          // 18 (key width) + 2 (spacing)
+	roleLines := WrapText(roleExpl, kvIndent, roleW)
+	for i, rl := range roleLines {
+		if i == 0 {
+			lines = append(lines, renderKV("Role", Theme.MutedStyle.Render(rl)))
+		} else {
+			lines = append(lines, kvIndent+Theme.MutedStyle.Render(rl))
+		}
+	}
 
 	// Status
 	lines = append(lines, renderKV("Status", StatusBadge(cert.OverallGrade)))
@@ -38,10 +48,15 @@ func RenderCertCard(cert analyzer.CertAnalysis) string {
 	// SANs
 	if len(cert.DNSNames) > 0 {
 		sans := strings.Join(cert.DNSNames, ", ")
-		if len(sans) > 80 {
-			sans = sans[:77] + "..."
+		sanW := ContentWidth(20)
+		sanLines := WrapText(sans, kvIndent, sanW)
+		for i, sl := range sanLines {
+			if i == 0 {
+				lines = append(lines, renderKV("DNS Names", sl))
+			} else {
+				lines = append(lines, kvIndent+sl)
+			}
 		}
-		lines = append(lines, renderKV("DNS Names", sans))
 	}
 	if len(cert.IPAddresses) > 0 {
 		lines = append(lines, renderKV("IP SANs", strings.Join(cert.IPAddresses, ", ")))
