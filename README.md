@@ -121,7 +121,9 @@ Grab the latest binary for your platform from the [Releases](https://github.com/
 | Platform | Binary |
 |----------|--------|
 | macOS (Apple Silicon) | `peep-darwin-arm64` |
+| macOS (Intel) | `peep-darwin-amd64` |
 | Linux (x86_64) | `peep-linux-amd64` |
+| Linux (ARM64) | `peep-linux-arm64` |
 | Linux (ppc64le) | `peep-linux-ppc64le` |
 | Windows (x86_64) | `peep-windows-amd64.exe` |
 

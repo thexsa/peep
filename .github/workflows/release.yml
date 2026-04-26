@@ -1,0 +1,72 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+
+      - name: Get version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
+
+      - name: Build all platforms
+        env:
+          VERSION: ${{ steps.version.outputs.VERSION }}
+          LDFLAGS: "-s -w -X github.com/thexsa/peep/internal/cli.Version=${{ steps.version.outputs.VERSION }}"
+        run: |
+          mkdir -p dist
+
+          echo "Building darwin/arm64..."
+          CGO_ENABLED=0 GOOS=darwin  GOARCH=arm64   go build -ldflags="$LDFLAGS" -o dist/peep-darwin-arm64       ./cmd/peep
+
+          echo "Building darwin/amd64..."
+          CGO_ENABLED=0 GOOS=darwin  GOARCH=amd64   go build -ldflags="$LDFLAGS" -o dist/peep-darwin-amd64       ./cmd/peep
+
+          echo "Building linux/amd64..."
+          CGO_ENABLED=0 GOOS=linux   GOARCH=amd64   go build -ldflags="$LDFLAGS" -o dist/peep-linux-amd64        ./cmd/peep
+
+          echo "Building linux/arm64..."
+          CGO_ENABLED=0 GOOS=linux   GOARCH=arm64   go build -ldflags="$LDFLAGS" -o dist/peep-linux-arm64        ./cmd/peep
+
+          echo "Building linux/ppc64le..."
+          CGO_ENABLED=0 GOOS=linux   GOARCH=ppc64le go build -ldflags="$LDFLAGS" -o dist/peep-linux-ppc64le      ./cmd/peep
+
+          echo "Building windows/amd64..."
+          CGO_ENABLED=0 GOOS=windows GOARCH=amd64   go build -ldflags="$LDFLAGS" -o dist/peep-windows-amd64.exe  ./cmd/peep
+
+      - name: Generate checksums
+        run: |
+          cd dist
+          sha256sum * > checksums-sha256.txt
+          cat checksums-sha256.txt
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "peep ${{ github.ref_name }}"
+          generate_release_notes: true
+          files: |
+            dist/peep-darwin-arm64
+            dist/peep-darwin-amd64
+            dist/peep-linux-amd64
+            dist/peep-linux-arm64
+            dist/peep-linux-ppc64le
+            dist/peep-windows-amd64.exe
+            dist/checksums-sha256.txt
