@@ -291,12 +291,26 @@ func renderJSON(report *analyzer.DiagnosticReport) error {
 		VerificationError:           report.Chain.VerificationError,
 		OverallGrade:                report.Chain.OverallGrade,
 	}
+	// Warnings: strip explain/fix/doc_ref unless --explain is set
+	warnings := report.Warnings
+	if !flagExplain {
+		stripped := make([]analyzer.Warning, len(warnings))
+		for i, w := range warnings {
+			stripped[i] = analyzer.Warning{
+				Code:     w.Code,
+				Severity: w.Severity,
+				Title:    w.Title,
+				Detail:   w.Detail,
+			}
+		}
+		warnings = stripped
+	}
 
 	out := jsonReport{
 		Target:         report.Target,
 		Handshake:      report.Handshake,
 		Chain:          chain,
-		Warnings:       report.Warnings,
+		Warnings:       warnings,
 		OverallStatus:  report.OverallStatus,
 		Verbosity:      flagVerbose,
 		ScanDurationMs: report.ScanDuration.Milliseconds(),
