@@ -225,25 +225,82 @@ func renderReport(report *analyzer.DiagnosticReport) {
 }
 
 func renderJSON(report *analyzer.DiagnosticReport) error {
-	// Build a JSON-friendly wrapper that converts duration to milliseconds
+	// JSON cert with optional PEM and role explanation
+	type jsonCert struct {
+		analyzer.CertAnalysis
+		RoleExplanation string `json:"role_explanation,omitempty"`
+		PEM             string `json:"pem,omitempty"`
+	}
+
+	// JSON chain with enriched certs
+	type jsonChain struct {
+		Certificates                []jsonCert           `json:"certificates"`
+		ChainLength                 int                  `json:"chain_length"`
+		HasMissingIntermediate      bool                 `json:"has_missing_intermediate"`
+		HasUnnecessaryRoot          bool                 `json:"has_unnecessary_root"`
+		LeafOnlyMissingIntermediate bool                 `json:"leaf_only_missing_intermediate"`
+		NoIssuingCAInResponse       bool                 `json:"no_issuing_ca_in_response"`
+		ChainOrderCorrect           bool                 `json:"chain_order_correct"`
+		TrustStoreVerified          bool                 `json:"trust_store_verified"`
+		VerificationError           string               `json:"verification_error,omitempty"`
+		OverallGrade                analyzer.HealthStatus `json:"overall_grade"`
+	}
+
 	type jsonReport struct {
-		Target        analyzer.TargetInfo        `json:"target"`
-		Handshake     analyzer.HandshakeAnalysis `json:"handshake"`
-		Chain         analyzer.ChainAnalysis     `json:"chain"`
-		Warnings      []analyzer.Warning         `json:"warnings"`
-		OverallStatus analyzer.HealthStatus      `json:"overall_status"`
-		ScanDurationMs int64                     `json:"scan_duration_ms"`
-		Timestamp     time.Time                  `json:"timestamp"`
+		Target         analyzer.TargetInfo        `json:"target"`
+		Handshake      analyzer.HandshakeAnalysis `json:"handshake"`
+		Chain          jsonChain                  `json:"chain"`
+		Warnings       []analyzer.Warning         `json:"warnings"`
+		OverallStatus  analyzer.HealthStatus      `json:"overall_status"`
+		Verbosity      int                        `json:"verbosity"`
+		ScanDurationMs int64                      `json:"scan_duration_ms"`
+		Timestamp      time.Time                  `json:"timestamp"`
+	}
+
+	// Build enriched cert list
+	var certs []jsonCert
+	for _, c := range report.Chain.Certificates {
+		jc := jsonCert{CertAnalysis: c}
+
+		// -v: include role explanation
+		if flagVerbose >= 1 {
+			jc.RoleExplanation = c.Role.RoleExplanation()
+		}
+
+		// -vv / --verbose: include PEM encoded cert
+		if flagVerbose >= 2 && c.RawCert != nil {
+			pemData := pem.EncodeToMemory(&pem.Block{
+				Type:  "CERTIFICATE",
+				Bytes: c.RawCert.Raw,
+			})
+			jc.PEM = string(pemData)
+		}
+
+		certs = append(certs, jc)
+	}
+
+	chain := jsonChain{
+		Certificates:                certs,
+		ChainLength:                 report.Chain.ChainLength,
+		HasMissingIntermediate:      report.Chain.HasMissingIntermediate,
+		HasUnnecessaryRoot:          report.Chain.HasUnnecessaryRoot,
+		LeafOnlyMissingIntermediate: report.Chain.LeafOnlyMissingIntermediate,
+		NoIssuingCAInResponse:       report.Chain.NoIssuingCAInResponse,
+		ChainOrderCorrect:           report.Chain.ChainOrderCorrect,
+		TrustStoreVerified:          report.Chain.TrustStoreVerified,
+		VerificationError:           report.Chain.VerificationError,
+		OverallGrade:                report.Chain.OverallGrade,
 	}
 
 	out := jsonReport{
-		Target:        report.Target,
-		Handshake:     report.Handshake,
-		Chain:         report.Chain,
-		Warnings:      report.Warnings,
-		OverallStatus: report.OverallStatus,
+		Target:         report.Target,
+		Handshake:      report.Handshake,
+		Chain:          chain,
+		Warnings:       report.Warnings,
+		OverallStatus:  report.OverallStatus,
+		Verbosity:      flagVerbose,
 		ScanDurationMs: report.ScanDuration.Milliseconds(),
-		Timestamp:     report.Timestamp,
+		Timestamp:      report.Timestamp,
 	}
 
 	data, err := json.MarshalIndent(out, "", "  ")
