@@ -211,8 +211,8 @@ func renderReport(report *analyzer.DiagnosticReport) {
 		}
 	}
 
-	// Always: Warnings
-	if len(report.Warnings) > 0 {
+	// FINDINGS section: only with -v/--verbose/--explain (default already shows in header + chain)
+	if len(report.Warnings) > 0 && (flagVerbose >= 1 || flagExplain) {
 		fmt.Println(ui.RenderWarnings(report.Warnings, flagExplain))
 	}
 
