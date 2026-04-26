@@ -7,9 +7,10 @@ dist/
 # Go
 vendor/
 
-# IDE
+# IDE / tools
 .idea/
 .vscode/
+.gemini/
 *.swp
 *.swo
 *~

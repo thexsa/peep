@@ -16,7 +16,7 @@ import (
 var scanCmd = &cobra.Command{
 	Use:   "scan <host>[:<port>]",
 	Short: "Deep scan — cipher enumeration, OCSP, and CT log checks",
-	Long: `Perform a comprehensive scan including:
+	Long: `Perform a deep scan including:
 
   - All checks from the default 'peep' command
   - Cipher suite enumeration (which ciphers does the server support?)
@@ -28,7 +28,7 @@ Note: This scan takes longer due to multiple connection probes.
 
 Examples:
   peep scan example.com
-  peep scan --why example.com`,
+  peep scan --explain example.com`,
 	Args: cobra.ExactArgs(1),
 	RunE: runScan,
 }

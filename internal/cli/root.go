@@ -31,18 +31,18 @@ var (
 var rootCmd = &cobra.Command{
 	Use:   "peep <host>[:<port>]",
 	Short: "peep — your digital eyes for TLS diagnostics",
-	Long: `peep is a TLS diagnostic tool designed for support engineers.
+	Long: `peep is a TLS diagnostic tool built for support engineers.
 It peeps into TLS handshakes and certificate chains to tell you
 exactly what's wrong — in plain English, not hex dumps.
 
-Smart protocol detection: peep automatically handles HTTPS, SMTP,
-RDP, LDAP, FTP, and more. Just give it a host and port.
+Smart protocol detection: peep handles HTTPS, SMTP, RDP, LDAP,
+FTP, and more. Just give it a host and port.
 
 Examples:
   peep example.com              Quick check (header + chain)
-  peep -v example.com           Show full cert details
-  peep -vv example.com          Full details + PEM encoded certs
-  peep --explain example.com    Explain all issues with fixes & doc refs
+  peep -v example.com           Extra cert details
+  peep -vv example.com          Full details + base64 PEM certs
+  peep --explain example.com    Explain issues with fixes & doc refs
   peep scan example.com         Deep scan with cipher enumeration
   peep --proto smtp server:2525 Force SMTP protocol on non-standard port`,
 	Args: cobra.MaximumNArgs(1),
@@ -58,8 +58,8 @@ func init() {
 	rootCmd.PersistentFlags().BoolVar(&flagJSON, "json", false, "Output as JSON (for scripting)")
 	rootCmd.PersistentFlags().BoolVar(&flagNoColor, "no-color", false, "Disable color output")
 	rootCmd.PersistentFlags().BoolVar(&flagInsecure, "insecure", false, "Skip system trust store verification")
-	rootCmd.PersistentFlags().CountVarP(&flagVerbose, "v", "v", "Verbosity: -v for cert details, -vv for PEM certs")
-	rootCmd.PersistentFlags().BoolVar(&flagVV, "verbose", false, "Max verbosity (same as -vv)")
+	rootCmd.PersistentFlags().CountVarP(&flagVerbose, "v", "v", "Verbosity: -v for extra cert details, -vv for PEM certs")
+	rootCmd.PersistentFlags().BoolVar(&flagVV, "verbose", false, "Max verbosity (same as -vv, includes base64 PEM certs)")
 	rootCmd.PersistentFlags().BoolVar(&flagExplain, "explain", false, "Explain each issue with fix recommendations and doc references")
 }
 
