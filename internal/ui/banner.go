@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"math/rand"
 	"strings"
 
 	"github.com/thexsa/peep/internal/analyzer"
@@ -31,10 +32,9 @@ func RenderSummaryHeader(host, port, ip, protocol string, report *analyzer.Diagn
 
 	// Prominent callout: server didn't include issuing CA
 	if report.Chain.NoIssuingCAInResponse {
-		maxW := ContentWidth(4)
 		lines = append(lines, "")
 		lines = append(lines, Theme.ErrorStyle.Render("  ⚠ SERVER DID NOT INCLUDE THE ISSUING CA IN ITS RESPONSE"))
-		lines = append(lines, wrapBlock("The intermediate certificate is missing from the server's TLS handshake. Most clients will fail to verify this chain. This must be fixed.", "    ", maxW, Theme.MutedStyle)...)
+		lines = append(lines, wrapBlock(noIssuingCABannerSaying(), "    ", ContentWidth(4), Theme.MutedStyle)...)
 	}
 
 	// Quick verdict
@@ -75,4 +75,23 @@ func RenderVersion(version string) string {
 
 	content := strings.Join([]string{logo, tagline, built}, "\n")
 	return ApplyBorder([]string{content}, HeaderBorder)
+}
+
+var noIssuingCABannerSayings = []string{
+	"How many times do we have to go over this? Include. The. Intermediate.",
+	"Leaf cert, intermediate cert, done. It's two files. TWO. How is this still happening?",
+	"We've been over this. The issuing CA goes IN the bundle. Not next to it. Not 'somewhere.' IN IT.",
+	"It's not rocket science. It's literally cat leaf.crt intermediate.crt > fullchain.crt. That's it.",
+	"At this point, I'm starting to think you're doing this on purpose.",
+	"This is the third time today. Include the intermediate. PLEASE.",
+	"The intermediate cert. In the chain. On the server. How is this still a conversation?",
+	"One job. You had ONE job. Bundle the certs correctly. ONE. JOB.",
+	"I explained this yesterday. And the day before. And the week before that.",
+	"You know what's missing? The intermediate. You know what's always missing? The intermediate.",
+	"I'm not mad. I'm just disappointed. Again. For the hundredth time.",
+	"Somewhere, a CA published a 'How to install your cert' guide. Nobody read it. Clearly.",
+}
+
+func noIssuingCABannerSaying() string {
+	return noIssuingCABannerSayings[rand.Intn(len(noIssuingCABannerSayings))]
 }
