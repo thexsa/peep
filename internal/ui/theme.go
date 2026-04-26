@@ -126,18 +126,24 @@ var (
 // ANSI color codes are invisible. We use 4 to be safe.
 const borderOverhead = 4
 
-// DisableColors strips all ANSI color and styling from the output.
-func DisableColors() {
+// PlainTextMode is true when --plain-text is set. Used by renderers
+// to strip emoji and other non-ASCII decoration.
+var PlainTextMode bool
+
+// EnablePlainText strips all color, emoji, and formatting for clean copy/paste output.
+func EnablePlainText() {
+	PlainTextMode = true
+
 	plain := lipgloss.NewStyle()
 
-	Theme.TitleStyle = plain.Bold(true)
+	Theme.TitleStyle = plain
 	Theme.SubtitleStyle = plain
 	Theme.SuccessStyle = plain
 	Theme.WarningStyle = plain
 	Theme.ErrorStyle = plain
 	Theme.InfoStyle = plain
 	Theme.MutedStyle = plain
-	Theme.BoldStyle = plain.Bold(true)
+	Theme.BoldStyle = plain
 	Theme.BoxStyle = plain
 	Theme.HeaderBoxStyle = plain
 	Theme.SectionStyle = plain
@@ -146,10 +152,31 @@ func DisableColors() {
 	Theme.DimKeyStyle = plain.Width(18)
 	Theme.ValueStyle = plain
 
-	// Rebuild borders without ANSI color codes
-	CardBorder = "│  "
-	SectionBorder = "┃  "
-	HeaderBorder = "┃  "
+	// Plain borders — no color codes
+	CardBorder = "|  "
+	SectionBorder = "|  "
+	HeaderBorder = "|  "
+}
+
+// StripEmoji removes common emoji and Unicode decorations from text.
+// Used in --plain-text mode for clean copy/paste output.
+func StripEmoji(s string) string {
+	if !PlainTextMode {
+		return s
+	}
+	replacer := strings.NewReplacer(
+		"📜", "", "📄", "", "📋", "", "🏛️", "", "🏛", "",
+		"⚠️", "[!]", "⚠", "[!]",
+		"🔗", "", "🤝", "", "⚡", "", "💡", "",
+		"📖", "", "📚", "", "🔍", "", "🔒", "[ENCRYPTED]",
+		"✅", "[PASS]", "❌", "[FAIL]",
+		"🌶️", "", "🌶", "",
+		"🔑", "", "👀", "",
+		"━", "-", "┃", "|", "│", "|",
+		"┌", "+", "┐", "+", "└", "+", "┘", "+",
+		"├", "+", "┤", "+", "─", "-",
+	)
+	return replacer.Replace(s)
 }
 
 // TermWidth returns the current terminal width, defaulting to 100 if
@@ -173,12 +200,14 @@ func ContentWidth(indent int) int {
 }
 
 // ApplyBorder prepends a border prefix to each line and joins them.
+// In plain-text mode, also strips emoji and Unicode decoration.
 func ApplyBorder(lines []string, prefix string) string {
 	var bordered []string
 	for _, line := range lines {
 		bordered = append(bordered, prefix+line)
 	}
-	return strings.Join(bordered, "\n")
+	result := strings.Join(bordered, "\n")
+	return StripEmoji(result)
 }
 
 // WrapText word-wraps a string to fit within maxWidth characters.

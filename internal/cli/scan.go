@@ -38,6 +38,10 @@ func init() {
 }
 
 func runScan(cmd *cobra.Command, args []string) error {
+	if flagPlainText {
+		ui.EnablePlainText()
+	}
+
 	target := args[0]
 
 	target = strings.TrimPrefix(target, "https://")
@@ -48,9 +52,6 @@ func runScan(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		host = target
 		port = "443"
-	}
-	if flagPort != "" {
-		port = flagPort
 	}
 
 	timeout := time.Duration(flagTimeout) * time.Second

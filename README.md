@@ -59,9 +59,9 @@ Just give peep a host and port. It figures out the rest.
 | 993/995 | IMAPS/POP3S | Direct TLS |
 | 21 | FTP | AUTH TLS upgrade |
 
-Override with `--proto` when services run on non-standard ports:
+Override with `-p`/`--proto` when services run on non-standard ports:
 ```bash
-peep --proto smtp mailserver:2525
+peep -p smtp mailserver:2525
 ```
 
 ### 🔗 Chain of Trust Visualization
@@ -182,7 +182,7 @@ make build-all
 # Quick check (defaults to port 443)
 peep example.com
 
-# Specific port
+# Specific port (always host:port format)
 peep example.com:8443
 
 # Extra cert details (subject, issuer, key info, SANs, etc.)
@@ -207,7 +207,10 @@ peep mail.example.com:587
 peep rdp-server.example.com:3389
 
 # Force protocol on non-standard port
-peep --proto smtp mailrelay.internal:2525
+peep -p smtp mailrelay.internal:2525
+
+# Plain text output (no color, no emoji — easy to copy/paste)
+peep --plain-text example.com
 
 # Deep scan (cipher enumeration, OCSP, CT logs)
 peep scan example.com
@@ -222,15 +225,16 @@ peep docs certs
 ### All Flags
 | Flag | Short | Description |
 |------|-------|-------------|
-| `--port` | `-p` | Override port (default: auto-detect) |
-| `--proto` | | Force protocol: `tls`, `smtp`, `rdp`, `ldap`, `ftp` |
+| `--proto` | `-p` | Force protocol: `tls`, `smtp`, `rdp`, `ldap`, `ftp` |
 | `--explain` | | Explain each issue with fix recommendations and doc references |
 | `-v` | | Extra cert details (subject, issuer, key info, SANs) |
 | `-vv` / `--verbose` | | Max verbosity — includes base64 PEM certs |
 | `--json` | | JSON output for scripting (respects -v, -vv, --explain) |
+| `--plain-text` | | No color, no emoji, no Unicode — easy to copy/paste |
 | `--timeout` | `-t` | Connection timeout in seconds (default: 5) |
 | `--insecure` | | Skip system trust store verification |
-| `--no-color` | | Disable color output |
+
+Port is always specified in the host argument: `host:port` (default: 443)
 
 ### Flag Combinations
 Flags work in any order and combine freely:
@@ -238,6 +242,7 @@ Flags work in any order and combine freely:
 peep --json --explain -vv example.com    # Full JSON with explanations and PEM certs
 peep -v --json example.com              # JSON with extra cert details
 peep --explain example.com              # CLI with issue explanations
+peep --plain-text --explain example.com  # Copy/paste friendly with explanations
 ```
 
 ---

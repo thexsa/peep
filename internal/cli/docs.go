@@ -36,17 +36,24 @@ func init() {
 }
 
 func runDocs(cmd *cobra.Command, args []string) error {
+	if flagPlainText {
+		ui.EnablePlainText()
+	}
+
 	if len(args) == 0 {
 		// Show table of contents
-		fmt.Println(ui.Theme.HeaderBoxStyle.Render(education.TableOfContents()))
+		toc := ui.StripEmoji(education.TableOfContents())
+		fmt.Println(ui.Theme.HeaderBoxStyle.Render(toc))
 		return nil
 	}
 
 	topic := education.GetTopic(args[0])
 	if topic == nil {
-		fmt.Println(ui.Theme.ErrorStyle.Render(fmt.Sprintf("❌ Unknown topic: %q", args[0])))
+		msg := ui.StripEmoji(fmt.Sprintf("❌ Unknown topic: %q", args[0]))
+		fmt.Println(ui.Theme.ErrorStyle.Render(msg))
 		fmt.Println()
-		fmt.Println(ui.Theme.HeaderBoxStyle.Render(education.TableOfContents()))
+		toc := ui.StripEmoji(education.TableOfContents())
+		fmt.Println(ui.Theme.HeaderBoxStyle.Render(toc))
 		return nil
 	}
 

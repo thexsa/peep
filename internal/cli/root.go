@@ -18,14 +18,13 @@ import (
 
 var (
 	// Flags
-	flagPort     string
-	flagProto    string
-	flagTimeout  int
-	flagJSON     bool
-	flagNoColor  bool
-	flagInsecure bool
-	flagVerbose  int  // 0 = default, 1 = -v, 2 = -vv/--verbose
-	flagExplain  bool // --explain
+	flagProto     string
+	flagTimeout   int
+	flagJSON      bool
+	flagPlainText bool
+	flagInsecure  bool
+	flagVerbose   int  // 0 = default, 1 = -v, 2 = -vv/--verbose
+	flagExplain   bool // --explain
 )
 
 var rootCmd = &cobra.Command{
@@ -39,12 +38,13 @@ Smart protocol detection: peep handles HTTPS, SMTP, RDP, LDAP,
 FTP, and more. Just give it a host and port.
 
 Examples:
-  peep example.com              Quick check (header + chain)
+  peep example.com              Quick check on port 443
+  peep example.com:8443         Check a specific port
   peep -v example.com           Extra cert details
   peep -vv example.com          Full details + base64 PEM certs
   peep --explain example.com    Explain issues with fixes & doc refs
   peep scan example.com         Deep scan with cipher enumeration
-  peep --proto smtp server:2525 Force SMTP protocol on non-standard port`,
+  peep -p smtp server:2525      Force SMTP protocol on non-standard port`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runPeep,
 }
@@ -52,11 +52,10 @@ Examples:
 var flagVV bool // --verbose
 
 func init() {
-	rootCmd.PersistentFlags().StringVarP(&flagPort, "port", "p", "", "Override port (default: auto-detect)")
-	rootCmd.PersistentFlags().StringVar(&flagProto, "proto", "", "Force protocol: tls, smtp, rdp, ldap, ftp (default: auto-detect by port)")
+	rootCmd.PersistentFlags().StringVarP(&flagProto, "proto", "p", "", "Force protocol: tls, smtp, rdp, ldap, ftp (default: auto-detect)")
 	rootCmd.PersistentFlags().IntVarP(&flagTimeout, "timeout", "t", 5, "Connection timeout in seconds")
 	rootCmd.PersistentFlags().BoolVar(&flagJSON, "json", false, "Output as JSON (for scripting)")
-	rootCmd.PersistentFlags().BoolVar(&flagNoColor, "no-color", false, "Disable color output")
+	rootCmd.PersistentFlags().BoolVar(&flagPlainText, "plain-text", false, "Plain text output (no color, no emoji, easy to copy/paste)")
 	rootCmd.PersistentFlags().BoolVar(&flagInsecure, "insecure", false, "Skip system trust store verification")
 	rootCmd.PersistentFlags().CountVarP(&flagVerbose, "v", "v", "Verbosity: -v for extra cert details, -vv for PEM certs")
 	rootCmd.PersistentFlags().BoolVar(&flagVV, "verbose", false, "Max verbosity (same as -vv, includes base64 PEM certs)")
@@ -85,16 +84,12 @@ func runPeep(cmd *cobra.Command, args []string) error {
 
 	flagVerbose = resolveVerbosity()
 
-	if flagNoColor {
-		ui.DisableColors()
+	if flagPlainText {
+		ui.EnablePlainText()
 	}
 
 	target := args[0]
 	host, port := parseTarget(target)
-
-	if flagPort != "" {
-		port = flagPort
-	}
 
 	startTime := time.Now()
 
