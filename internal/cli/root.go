@@ -85,6 +85,10 @@ func runPeep(cmd *cobra.Command, args []string) error {
 
 	flagVerbose = resolveVerbosity()
 
+	if flagNoColor {
+		ui.DisableColors()
+	}
+
 	target := args[0]
 	host, port := parseTarget(target)
 

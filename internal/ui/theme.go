@@ -126,6 +126,32 @@ var (
 // ANSI color codes are invisible. We use 4 to be safe.
 const borderOverhead = 4
 
+// DisableColors strips all ANSI color and styling from the output.
+func DisableColors() {
+	plain := lipgloss.NewStyle()
+
+	Theme.TitleStyle = plain.Bold(true)
+	Theme.SubtitleStyle = plain
+	Theme.SuccessStyle = plain
+	Theme.WarningStyle = plain
+	Theme.ErrorStyle = plain
+	Theme.InfoStyle = plain
+	Theme.MutedStyle = plain
+	Theme.BoldStyle = plain.Bold(true)
+	Theme.BoxStyle = plain
+	Theme.HeaderBoxStyle = plain
+	Theme.SectionStyle = plain
+	Theme.CardStyle = plain
+	Theme.KeyStyle = plain.Width(18)
+	Theme.DimKeyStyle = plain.Width(18)
+	Theme.ValueStyle = plain
+
+	// Rebuild borders without ANSI color codes
+	CardBorder = "│  "
+	SectionBorder = "┃  "
+	HeaderBorder = "┃  "
+}
+
 // TermWidth returns the current terminal width, defaulting to 100 if
 // detection fails.
 func TermWidth() int {
