@@ -31,36 +31,52 @@ func (h HealthStatus) String() string {
 	}
 }
 
+// MarshalJSON outputs the health status as a JSON string.
+func (h HealthStatus) MarshalJSON() ([]byte, error) {
+	var s string
+	switch h {
+	case MainCharacterEnergy:
+		s = "pass"
+	case MallCopCredentials:
+		s = "warn"
+	case WrittenInCrayon:
+		s = "fail"
+	default:
+		s = "unknown"
+	}
+	return []byte(`"` + s + `"`), nil
+}
+
 // Warning represents a single diagnostic finding.
 type Warning struct {
-	Code     string       // Machine-readable code, e.g. "TLS_OLD_VERSION"
-	Severity HealthStatus // How bad is it?
-	Title    string       // Short human title: "Ancient TLS Version"
-	Detail   string       // Technical detail string
-	Why      string       // Sarcastic commentary
-	Explain  string       // --explain: detailed explanation of why this matters
-	Fix      string       // --explain: recommended fix
-	DocRef   string       // --explain: peep docs command for more info
+	Code     string       `json:"code"`
+	Severity HealthStatus `json:"severity"`
+	Title    string       `json:"title"`
+	Detail   string       `json:"detail"`
+	Why      string       `json:"-"`
+	Explain  string       `json:"explain,omitempty"`
+	Fix      string       `json:"fix,omitempty"`
+	DocRef   string       `json:"doc_ref,omitempty"`
 }
 
 // TargetInfo holds information about the connection target.
 type TargetInfo struct {
-	Host       string
-	Port       string
-	IP         string
-	Protocol   string // "HTTPS", "SMTP/STARTTLS", "RDP", "LDAPS", etc.
-	ProbeType  string // "direct_tls", "starttls_smtp", "rdp_x224", "starttls_ldap"
+	Host       string `json:"host"`
+	Port       string `json:"port"`
+	IP         string `json:"ip"`
+	Protocol   string `json:"protocol"`
+	ProbeType  string `json:"probe_type"`
 }
 
 // HandshakeAnalysis holds the TLS handshake assessment.
 type HandshakeAnalysis struct {
-	TLSVersion      string       // "TLSv1.3", "TLSv1.2", etc.
-	TLSVersionRaw   uint16       // Raw TLS version constant
-	CipherSuite     string       // Human-readable cipher suite name
-	CipherSuiteRaw  uint16       // Raw cipher suite constant
-	CipherGrade     HealthStatus // Assessment of the cipher
-	VersionGrade    HealthStatus // Assessment of the TLS version
-	OverallGrade    HealthStatus
+	TLSVersion      string       `json:"tls_version"`
+	TLSVersionRaw   uint16       `json:"tls_version_raw"`
+	CipherSuite     string       `json:"cipher_suite"`
+	CipherSuiteRaw  uint16       `json:"cipher_suite_raw"`
+	CipherGrade     HealthStatus `json:"cipher_grade"`
+	VersionGrade    HealthStatus `json:"version_grade"`
+	OverallGrade    HealthStatus `json:"overall_grade"`
 }
 
 // CertRole identifies a certificate's position in the chain.
@@ -86,6 +102,22 @@ func (r CertRole) String() string {
 	}
 }
 
+// MarshalJSON outputs the cert role as a JSON string.
+func (r CertRole) MarshalJSON() ([]byte, error) {
+	var s string
+	switch r {
+	case RoleLeaf:
+		s = "leaf"
+	case RoleIntermediate:
+		s = "intermediate"
+	case RoleRoot:
+		s = "root"
+	default:
+		s = "unknown"
+	}
+	return []byte(`"` + s + `"`), nil
+}
+
 // RoleExplanation returns a plain-English explanation of what this role means.
 func (r CertRole) RoleExplanation() string {
 	switch r {
@@ -107,55 +139,55 @@ func (r CertRole) RoleExplanation() string {
 
 // CertAnalysis holds the assessment of a single certificate.
 type CertAnalysis struct {
-	Depth            int
-	Role             CertRole
-	Subject          string
-	Issuer           string
-	CommonName       string
-	Organization     string
-	DNSNames         []string
-	IPAddresses      []string
-	NotBefore        time.Time
-	NotAfter         time.Time
-	DaysRemaining    int
-	IsExpired        bool
-	ExpiryGrade      HealthStatus
-	SerialNumber     string
-	SignatureAlg     string
-	SignatureGrade   HealthStatus
-	KeyType          string // "RSA 2048", "ECDSA P-256", etc.
-	KeyBits          int
-	KeyGrade         HealthStatus
-	Fingerprint      string // SHA-256 hex
-	IsSelfSigned     bool
-	IsWildcard       bool
-	IsCA             bool
-	HostnameMatch    bool   // Does the cert cover the target hostname?
-	OverallGrade     HealthStatus
-	RawCert          *x509.Certificate
+	Depth            int          `json:"depth"`
+	Role             CertRole     `json:"role"`
+	Subject          string       `json:"subject"`
+	Issuer           string       `json:"issuer"`
+	CommonName       string       `json:"common_name"`
+	Organization     string       `json:"organization,omitempty"`
+	DNSNames         []string     `json:"dns_names,omitempty"`
+	IPAddresses      []string     `json:"ip_addresses,omitempty"`
+	NotBefore        time.Time    `json:"not_before"`
+	NotAfter         time.Time    `json:"not_after"`
+	DaysRemaining    int          `json:"days_remaining"`
+	IsExpired        bool         `json:"is_expired"`
+	ExpiryGrade      HealthStatus `json:"expiry_grade"`
+	SerialNumber     string       `json:"serial_number"`
+	SignatureAlg     string       `json:"signature_algorithm"`
+	SignatureGrade   HealthStatus `json:"signature_grade"`
+	KeyType          string       `json:"key_type"`
+	KeyBits          int          `json:"key_bits"`
+	KeyGrade         HealthStatus `json:"key_grade"`
+	Fingerprint      string       `json:"fingerprint_sha256"`
+	IsSelfSigned     bool         `json:"is_self_signed"`
+	IsWildcard       bool         `json:"is_wildcard"`
+	IsCA             bool         `json:"is_ca"`
+	HostnameMatch    bool         `json:"hostname_match"`
+	OverallGrade     HealthStatus `json:"overall_grade"`
+	RawCert          *x509.Certificate `json:"-"`
 }
 
 // ChainAnalysis holds the assessment of the entire certificate chain.
 type ChainAnalysis struct {
-	Certificates                []CertAnalysis
-	ChainLength                 int
-	HasMissingIntermediate      bool
-	HasUnnecessaryRoot          bool
-	LeafOnlyMissingIntermediate bool // Leaf only, and issuer is NOT a root CA
-	NoIssuingCAInResponse       bool // Server didn't include ANY issuing CA cert
-	ChainOrderCorrect           bool
-	TrustStoreVerified          bool
-	VerificationError           string
-	OverallGrade                HealthStatus
+	Certificates                []CertAnalysis `json:"certificates"`
+	ChainLength                 int            `json:"chain_length"`
+	HasMissingIntermediate      bool           `json:"has_missing_intermediate"`
+	HasUnnecessaryRoot          bool           `json:"has_unnecessary_root"`
+	LeafOnlyMissingIntermediate bool           `json:"leaf_only_missing_intermediate"`
+	NoIssuingCAInResponse       bool           `json:"no_issuing_ca_in_response"`
+	ChainOrderCorrect           bool           `json:"chain_order_correct"`
+	TrustStoreVerified          bool           `json:"trust_store_verified"`
+	VerificationError           string         `json:"verification_error,omitempty"`
+	OverallGrade                HealthStatus   `json:"overall_grade"`
 }
 
 // DiagnosticReport is the complete output of a peep scan.
 type DiagnosticReport struct {
-	Target       TargetInfo
-	Handshake    HandshakeAnalysis
-	Chain        ChainAnalysis
-	Warnings     []Warning
-	OverallStatus HealthStatus
-	ScanDuration time.Duration
-	Timestamp    time.Time
+	Target       TargetInfo        `json:"target"`
+	Handshake    HandshakeAnalysis `json:"handshake"`
+	Chain        ChainAnalysis     `json:"chain"`
+	Warnings     []Warning         `json:"warnings"`
+	OverallStatus HealthStatus     `json:"overall_status"`
+	ScanDuration time.Duration     `json:"scan_duration_ms"`
+	Timestamp    time.Time         `json:"timestamp"`
 }

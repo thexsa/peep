@@ -1,10 +1,10 @@
 package cli
 
 import (
+	"encoding/json"
 	"encoding/pem"
 	"fmt"
 	"net"
-	"os"
 	"strings"
 	"time"
 
@@ -225,7 +225,31 @@ func renderReport(report *analyzer.DiagnosticReport) {
 }
 
 func renderJSON(report *analyzer.DiagnosticReport) error {
-	fmt.Fprintf(os.Stderr, "JSON output is planned for a future release.\n")
-	_ = report
+	// Build a JSON-friendly wrapper that converts duration to milliseconds
+	type jsonReport struct {
+		Target        analyzer.TargetInfo        `json:"target"`
+		Handshake     analyzer.HandshakeAnalysis `json:"handshake"`
+		Chain         analyzer.ChainAnalysis     `json:"chain"`
+		Warnings      []analyzer.Warning         `json:"warnings"`
+		OverallStatus analyzer.HealthStatus      `json:"overall_status"`
+		ScanDurationMs int64                     `json:"scan_duration_ms"`
+		Timestamp     time.Time                  `json:"timestamp"`
+	}
+
+	out := jsonReport{
+		Target:        report.Target,
+		Handshake:     report.Handshake,
+		Chain:         report.Chain,
+		Warnings:      report.Warnings,
+		OverallStatus: report.OverallStatus,
+		ScanDurationMs: report.ScanDuration.Milliseconds(),
+		Timestamp:     report.Timestamp,
+	}
+
+	data, err := json.MarshalIndent(out, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal JSON: %w", err)
+	}
+	fmt.Println(string(data))
 	return nil
 }
