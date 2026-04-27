@@ -114,7 +114,18 @@ Every finding comes with rotating sarcastic remarks. Because debugging TLS shoul
 
 ## Installation
 
-### Option 1: Download a binary
+### Option 1: Homebrew (macOS / Linux)
+
+```bash
+brew install thexsa/tap/peep
+```
+
+To update later:
+```bash
+brew update && brew upgrade peep
+```
+
+### Option 2: Download a binary
 
 Grab the latest binary for your platform from the [Releases](https://github.com/thexsa/peep/releases) page.
 
@@ -149,7 +160,7 @@ peep --help
 
 Download `peep-windows-amd64.exe`, rename it to `peep.exe`, and place it in a directory that's in your `%PATH%` (e.g., `C:\Users\<you>\bin`).
 
-### Option 2: Build from source
+### Option 3: Build from source
 
 Requires **Go 1.23+**. No CGO, no OpenSSL, no external dependencies.
 
