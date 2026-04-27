@@ -1,4 +1,4 @@
-VERSION := 0.1.0
+VERSION := $(shell git describe --tags --always 2>/dev/null | sed 's/^v//' || echo "dev")
 BINARY  := peep
 LDFLAGS := -s -w -X github.com/thexsa/peep/internal/cli.Version=$(VERSION)
 
