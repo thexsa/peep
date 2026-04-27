@@ -167,21 +167,37 @@ func checkCert(cert analyzer.CertAnalysis) []analyzer.Warning {
 func checkChain(chain analyzer.ChainAnalysis) []analyzer.Warning {
 	var w []analyzer.Warning
 
-	// ALWAYS call out when server didn't include the issuing CA
-	if chain.NoIssuingCAInResponse {
+	// These three flags (LeafOnlyMissingIntermediate, HasMissingIntermediate,
+	// NoIssuingCAInResponse) overlap heavily — especially when the server sends
+	// only the leaf cert. Emit only the most specific applicable finding to
+	// avoid triple-reporting the same root cause.
+	switch {
+	case chain.HasWrongIntermediate:
+		// Server sent an intermediate with the right name but the wrong key.
 		w = append(w, analyzer.Warning{
-			Code:     "CHAIN_NO_ISSUING_CA",
+			Code:     "CHAIN_WRONG_INTERMEDIATE",
 			Severity: analyzer.WrittenInCrayon,
-			Title:    "No Issuing CA in Server Response",
-			Detail:   "The server did not include the issuing CA certificate in its TLS response.",
-			Why:      pick(noIssuingCASayings),
-			Explain:  "During the TLS handshake, the server is expected to send the complete certificate chain: the leaf cert plus any intermediate CA certs that signed it. This server sent only the leaf certificate — no issuing CA was included. Without the issuing CA, clients cannot build a trust path to a root CA. Some browsers may work (they can fetch intermediates via AIA), but most applications, APIs, curl, mobile apps, and IoT devices will fail with a trust error.",
-			Fix:      "Add the issuing CA (intermediate) certificate to the server's cert chain. Concatenate them: cat leaf.crt intermediate.crt > fullchain.crt. In nginx: ssl_certificate should contain the full chain. In Apache: use SSLCertificateChainFile. If this is a self-signed cert, either replace it with a CA-signed cert or distribute it to all client trust stores.",
+			Title:    "Wrong Issuing CA in Server Response",
+			Detail:   "The server sent an intermediate whose name matches the leaf's issuer, but whose key did NOT sign the leaf certificate.",
+			Why:      pick(wrongIntermediateSayings),
+			Explain:  "The server included an intermediate certificate that has the correct issuer name (Subject DN), but its public key does not match the key that signed the leaf certificate. This happens when a CA is renewed or re-keyed — the CA gets a new key pair, but the old leaf cert was signed by the old key. The chain looks right on paper, but the cryptographic signature doesn't verify. Most clients will reject this chain entirely.",
+			Fix:      "Either (1) re-issue the leaf certificate using the new CA key so the signature matches the intermediate being served, or (2) replace the intermediate on the server with the OLD intermediate cert whose key actually signed the leaf. Option 1 is the correct long-term fix. After a CA re-key, ALL leaf certs signed by the old key must be re-issued.",
 			DocRef:   "peep docs chain",
 		})
-	}
-
-	if chain.HasMissingIntermediate {
+	case chain.LeafOnlyMissingIntermediate:
+		// Most specific: server sent ONLY the leaf, and its issuer isn't a root.
+		w = append(w, analyzer.Warning{
+			Code:     "CHAIN_LEAF_ONLY",
+			Severity: analyzer.WrittenInCrayon,
+			Title:    "Incomplete Chain — Server Sent Only the Leaf Certificate",
+			Detail:   "Only the leaf cert was sent. Its issuer is NOT a root CA, so the intermediate must be included.",
+			Why:      pick(leafOnlySayings),
+			Explain:  "During the TLS handshake, the server is expected to send the complete certificate chain: the leaf cert plus any intermediate CA certs that signed it. This server sent ONLY the leaf certificate — no issuing CA was included. The issuing CA is an intermediate CA (not a root), which means clients cannot verify the chain unless they happen to have the intermediate already installed — and most don't. Some browsers can fetch missing intermediates via AIA, but most applications, APIs, curl, mobile apps, and IoT devices will fail with a trust error.",
+			Fix:      "Add the intermediate certificate to your server's cert chain. Concatenate them: cat leaf.crt intermediate.crt > fullchain.crt. In nginx: ssl_certificate should contain the full chain. In Apache: use SSLCertificateChainFile. Download the intermediate from your CA's repository. Do NOT rely on clients having the intermediate pre-installed. Verify with: peep <host>",
+			DocRef:   "peep docs chain",
+		})
+	case chain.HasMissingIntermediate:
+		// Server sent multiple certs but an intermediate is still missing.
 		w = append(w, analyzer.Warning{
 			Code:     "CHAIN_MISSING_INTERMEDIATE",
 			Severity: analyzer.WrittenInCrayon,
@@ -192,17 +208,16 @@ func checkChain(chain analyzer.ChainAnalysis) []analyzer.Warning {
 			Fix:      "Download the correct intermediate certificate from your CA's website. Concatenate it with your leaf cert (leaf first, then intermediate). In nginx: ssl_certificate should contain both. In Apache: use SSLCertificateChainFile. Verify with: peep <host>",
 			DocRef:   "peep docs chain",
 		})
-	}
-
-	if chain.LeafOnlyMissingIntermediate {
+	case chain.NoIssuingCAInResponse:
+		// Broadest: no issuing CA present (shouldn't fire if the above two didn't, but just in case).
 		w = append(w, analyzer.Warning{
-			Code:     "CHAIN_LEAF_ONLY",
+			Code:     "CHAIN_NO_ISSUING_CA",
 			Severity: analyzer.WrittenInCrayon,
-			Title:    "Leaf-Only Chain — Intermediate CA Not Included",
-			Detail:   "Only the leaf cert was sent. Its issuer is NOT a root CA.",
-			Why:      pick(leafOnlySayings),
-			Explain:  "The server sent ONLY the leaf certificate. The issuing CA (the cert that signed the leaf) is an intermediate CA, not a root CA. This means clients cannot verify the chain unless they happen to have the intermediate CA cert already installed — which most don't. Root CAs belong in trust stores; intermediate CAs belong in the server's chain.",
-			Fix:      "Add the intermediate certificate to your server's cert chain. The correct order is: leaf cert → intermediate cert(s). Download the intermediate from your CA's repository. Do NOT rely on clients having the intermediate pre-installed.",
+			Title:    "No Issuing CA in Server Response",
+			Detail:   "The server did not include the issuing CA certificate in its TLS response.",
+			Why:      pick(noIssuingCASayings),
+			Explain:  "During the TLS handshake, the server is expected to send the complete certificate chain: the leaf cert plus any intermediate CA certs that signed it. This server sent only the leaf certificate — no issuing CA was included. Without the issuing CA, clients cannot build a trust path to a root CA. Some browsers may work (they can fetch intermediates via AIA), but most applications, APIs, curl, mobile apps, and IoT devices will fail with a trust error.",
+			Fix:      "Add the issuing CA (intermediate) certificate to the server's cert chain. Concatenate them: cat leaf.crt intermediate.crt > fullchain.crt. In nginx: ssl_certificate should contain the full chain. In Apache: use SSLCertificateChainFile. If this is a self-signed cert, either replace it with a CA-signed cert or distribute it to all client trust stores.",
 			DocRef:   "peep docs chain",
 		})
 	}
@@ -422,6 +437,19 @@ var leafOnlySayings = []string{
 	"This is like giving someone directions but skipping the middle steps. 'Turn left, then... arrive.' How?",
 	"Intermediate CAs exist to be SENT in the chain. Not to be trusted individually on every client machine.",
 	"For this to work, every single client needs the intermediate cert installed. Every. Single. One. No.",
+}
+
+var wrongIntermediateSayings = []string{
+	"Right name, wrong key. The CA was renewed but the leaf was left behind. Classic enterprise PKI.",
+	"The intermediate looks correct on paper. But the signature doesn't verify. That's what matters.",
+	"Someone swapped the CA without re-issuing the leaf. The name matches. The key doesn't.",
+	"This is the PKI equivalent of changing the locks and not giving anyone new keys.",
+	"The CA got re-keyed and nobody re-signed the leaf. The chain is broken at the most fundamental level.",
+	"The issuer name matches perfectly. The cryptographic signature? Not even close.",
+	"New CA key, old leaf cert. You can't just swap the intermediate and call it a day.",
+	"The CA was renewed (probably re-keyed), but the leaf cert still carries the old signature. Re-issue it.",
+	"This chain will fail signature verification on every client. The math doesn't lie.",
+	"Close only counts in horseshoes. In PKI, the signature has to actually verify.",
 }
 
 var wrongOrderSayings = []string{

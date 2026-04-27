@@ -17,14 +17,15 @@ func AnalyzeChain(state *tls.ConnectionState, targetHost string, skipVerify bool
 	}
 
 	analysis.ChainOrderCorrect = verifyChainOrder(certs)
-	analysis.HasMissingIntermediate = checkMissingIntermediate(certs)
+	analysis.HasWrongIntermediate = checkWrongIntermediate(certs)
+	analysis.HasMissingIntermediate = !analysis.HasWrongIntermediate && checkMissingIntermediate(certs)
 	analysis.HasUnnecessaryRoot = checkUnnecessaryRoot(certs)
 	analysis.LeafOnlyMissingIntermediate = checkLeafOnlyMissingIntermediate(certs)
 
 	// NoIssuingCAInResponse: true if the server sent only the leaf cert
 	// (regardless of whether it's self-signed) or if intermediates are missing.
-	// This means the server's TLS response contained no issuing CA certificate.
-	if len(certs) == 1 || analysis.HasMissingIntermediate {
+	// But NOT if the server sent a wrong intermediate — that's a different problem.
+	if (len(certs) == 1 || analysis.HasMissingIntermediate) && !analysis.HasWrongIntermediate {
 		analysis.NoIssuingCAInResponse = true
 	}
 
@@ -83,6 +84,30 @@ func checkLeafOnlyMissingIntermediate(certs []*x509.Certificate) bool {
 	return true
 }
 
+// checkWrongIntermediate detects when the server sends an intermediate
+// whose subject DN matches the leaf's issuer DN, but whose public key
+// did NOT sign the leaf certificate. This typically happens when:
+//   - The CA was renewed with a new key pair (re-keyed)
+//   - The server admin updated the intermediate bundle but didn't re-issue the leaf
+//   - The wrong intermediate cert was grabbed during renewal
+func checkWrongIntermediate(certs []*x509.Certificate) bool {
+	if len(certs) < 2 {
+		return false
+	}
+	for i := 0; i < len(certs)-1; i++ {
+		child := certs[i]
+		parent := certs[i+1]
+		// Issuer DN matches (server thinks this is the right CA)...
+		if child.Issuer.String() == parent.Subject.String() {
+			// ...but the signature doesn't verify (wrong key)
+			if err := child.CheckSignatureFrom(parent); err != nil {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func checkUnnecessaryRoot(certs []*x509.Certificate) bool {
 	if len(certs) <= 1 {
 		return false
@@ -119,6 +144,9 @@ func gradeChain(a ChainAnalysis) HealthStatus {
 		grade = worst(grade, WrittenInCrayon)
 	}
 	if a.HasMissingIntermediate {
+		grade = worst(grade, WrittenInCrayon)
+	}
+	if a.HasWrongIntermediate {
 		grade = worst(grade, WrittenInCrayon)
 	}
 	if a.HasUnnecessaryRoot {

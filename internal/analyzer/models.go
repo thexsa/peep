@@ -172,6 +172,7 @@ type ChainAnalysis struct {
 	Certificates                []CertAnalysis `json:"certificates"`
 	ChainLength                 int            `json:"chain_length"`
 	HasMissingIntermediate      bool           `json:"has_missing_intermediate"`
+	HasWrongIntermediate        bool           `json:"has_wrong_intermediate"`
 	HasUnnecessaryRoot          bool           `json:"has_unnecessary_root"`
 	LeafOnlyMissingIntermediate bool           `json:"leaf_only_missing_intermediate"`
 	NoIssuingCAInResponse       bool           `json:"no_issuing_ca_in_response"`

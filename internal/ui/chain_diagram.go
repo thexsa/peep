@@ -30,17 +30,29 @@ func RenderChainDiagram(chain analyzer.ChainAnalysis) string {
 	noteW := ContentWidth(7) // 7 = "       " indent
 	noteIndent := "       "
 
-	if chain.NoIssuingCAInResponse {
+	// These conditions overlap (especially for single-cert chains).
+	// Show only the most specific applicable finding.
+	switch {
+	case chain.HasWrongIntermediate:
+		lines = append(lines, "")
+		lines = append(lines, Theme.ErrorStyle.Render("[FAIL] Wrong Issuing CA in server response"))
+		lines = append(lines, wrapBlock("The server sent an intermediate certificate with the correct issuer name, but the wrong key. The leaf cert was NOT signed by this intermediate. This usually happens after a CA renewal or re-key — the old leaf cert needs to be re-issued with the new CA key.", noteIndent, noteW, Theme.MutedStyle)...)
+		lines = append(lines, wrapBlock(wrongIntermediateSaying(), noteIndent, noteW, Theme.MutedStyle)...)
+	case chain.LeafOnlyMissingIntermediate:
+		lines = append(lines, "")
+		lines = append(lines, Theme.ErrorStyle.Render("[FAIL] Incomplete chain — server sent only the leaf certificate"))
+		lines = append(lines, wrapBlock("The server sent ONLY the leaf cert and no issuing CA. The issuer is an intermediate CA (not a root), so clients cannot verify the chain without it. Include the intermediate in your cert bundle.", noteIndent, noteW, Theme.MutedStyle)...)
+		lines = append(lines, wrapBlock(noIssuingCAChainSaying(), noteIndent, noteW, Theme.MutedStyle)...)
+	case chain.HasMissingIntermediate:
+		lines = append(lines, "")
+		lines = append(lines, Theme.ErrorStyle.Render("[FAIL] Missing intermediate certificate(s)"))
+		lines = append(lines, wrapBlock("The server did not send all required intermediate certificates. Clients cannot build a trust path to a root CA without them.", noteIndent, noteW, Theme.MutedStyle)...)
+		lines = append(lines, wrapBlock(noIssuingCAChainSaying(), noteIndent, noteW, Theme.MutedStyle)...)
+	case chain.NoIssuingCAInResponse:
 		lines = append(lines, "")
 		lines = append(lines, Theme.ErrorStyle.Render("[FAIL] No Issuing CA in server response"))
 		lines = append(lines, wrapBlock("The server did not include the issuing CA certificate in its TLS handshake. Clients cannot build a trust path without it. This must be fixed.", noteIndent, noteW, Theme.MutedStyle)...)
 		lines = append(lines, wrapBlock(noIssuingCAChainSaying(), noteIndent, noteW, Theme.MutedStyle)...)
-	}
-
-	if chain.HasMissingIntermediate {
-		lines = append(lines, "")
-		lines = append(lines, Theme.ErrorStyle.Render("[FAIL] Missing intermediate certificate(s)"))
-		lines = append(lines, wrapBlock("You forgot the cert that vouches for the leaf. How is this in production?", noteIndent, noteW, Theme.MutedStyle)...)
 	}
 
 	if !chain.ChainOrderCorrect {
@@ -53,12 +65,6 @@ func RenderChainDiagram(chain analyzer.ChainAnalysis) string {
 		lines = append(lines, "")
 		lines = append(lines, Theme.WarningStyle.Render("[WARN] Server is sending the Root CA cert — unnecessary"))
 		lines = append(lines, wrapBlock("The root is already in the trust store. You're just wasting bandwidth.", noteIndent, noteW, Theme.MutedStyle)...)
-	}
-
-	if chain.LeafOnlyMissingIntermediate {
-		lines = append(lines, "")
-		lines = append(lines, Theme.ErrorStyle.Render("[FAIL] Leaf-only chain — intermediate CA not included"))
-		lines = append(lines, wrapBlock("The server sent ONLY the leaf cert. The issuing CA is NOT a root, which means clients need BOTH the intermediate AND root trusted. That's not how this works. Include the intermediate in your chain.", noteIndent, noteW, Theme.MutedStyle)...)
 	}
 
 	// Trust store verification
@@ -211,4 +217,21 @@ func chainVerifiedSaying() string {
 
 func chainFailedSaying() string {
 	return chainFailedSayings[rand.Intn(len(chainFailedSayings))]
+}
+
+var wrongIntermediateSayings = []string{
+	"The name's right. The key's wrong. It's like showing up with someone else's badge and expecting to get in.",
+	"The CA was renewed but the leaf cert wasn't re-issued. Close, but no cigar.",
+	"Right name, wrong key. That's identity theft in PKI terms.",
+	"The intermediate has the correct label on a completely different bottle. Re-issue the leaf.",
+	"Someone renewed the CA and forgot to re-sign everything underneath it. Classic.",
+	"This is the PKI equivalent of changing the locks but not giving anyone new keys.",
+	"The issuer name matches, but the math doesn't. Cryptography doesn't do 'close enough.'",
+	"The CA got a new key pair and nobody told the leaf cert. Awkward.",
+	"New CA key, old leaf signature. That's a broken chain with extra steps.",
+	"The signature verification failed because this intermediate is the new version. The leaf was signed by the old one.",
+}
+
+func wrongIntermediateSaying() string {
+	return wrongIntermediateSayings[rand.Intn(len(wrongIntermediateSayings))]
 }
