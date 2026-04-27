@@ -70,3 +70,72 @@ jobs:
             dist/peep-linux-ppc64le
             dist/peep-windows-amd64.exe
             dist/checksums-sha256.txt
+
+      - name: Update Homebrew formula
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          VERSION: ${{ steps.version.outputs.VERSION }}
+        run: |
+          if [ -z "$HOMEBREW_TAP_TOKEN" ]; then
+            echo "HOMEBREW_TAP_TOKEN not set — skipping formula update"
+            exit 0
+          fi
+
+          # Read checksums from the build
+          SHA_DARWIN_ARM64=$(grep peep-darwin-arm64 dist/checksums-sha256.txt | awk '{print $1}')
+          SHA_DARWIN_AMD64=$(grep peep-darwin-amd64 dist/checksums-sha256.txt | awk '{print $1}')
+          SHA_LINUX_AMD64=$(grep peep-linux-amd64 dist/checksums-sha256.txt | awk '{print $1}')
+          SHA_LINUX_ARM64=$(grep peep-linux-arm64 dist/checksums-sha256.txt | awk '{print $1}')
+
+          # Generate formula
+          cat > /tmp/peep.rb << FORMULA
+          class Peep < Formula
+            desc "TLS diagnostic tool — peeps into handshakes and certificate chains"
+            homepage "https://github.com/thexsa/peep"
+            version "${VERSION}"
+            license "Apache-2.0"
+
+            on_macos do
+              if Hardware::CPU.arm?
+                url "https://github.com/thexsa/peep/releases/download/v#{version}/peep-darwin-arm64"
+                sha256 "${SHA_DARWIN_ARM64}"
+              else
+                url "https://github.com/thexsa/peep/releases/download/v#{version}/peep-darwin-amd64"
+                sha256 "${SHA_DARWIN_AMD64}"
+              end
+            end
+
+            on_linux do
+              if Hardware::CPU.arm?
+                url "https://github.com/thexsa/peep/releases/download/v#{version}/peep-linux-arm64"
+                sha256 "${SHA_LINUX_ARM64}"
+              else
+                url "https://github.com/thexsa/peep/releases/download/v#{version}/peep-linux-amd64"
+                sha256 "${SHA_LINUX_AMD64}"
+              end
+            end
+
+            def install
+              binary = Dir["peep-*"].first || "peep"
+              bin.install binary => "peep"
+            end
+
+            test do
+              assert_match "peep", shell_output("#{bin}/peep --help")
+            end
+          end
+          FORMULA
+
+          # Remove leading whitespace from heredoc
+          sed -i 's/^          //' /tmp/peep.rb
+
+          # Clone tap repo, update formula, push
+          git clone "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/thexsa/homebrew-tap.git" /tmp/homebrew-tap
+          mkdir -p /tmp/homebrew-tap/Formula
+          cp /tmp/peep.rb /tmp/homebrew-tap/Formula/peep.rb
+          cd /tmp/homebrew-tap
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/peep.rb
+          git commit -m "peep ${VERSION}" || echo "No changes to commit"
+          git push
