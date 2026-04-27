@@ -79,7 +79,7 @@ func runScan(cmd *cobra.Command, args []string) error {
 	fmt.Println(ui.RenderHandshakeCard(handshake))
 
 	// Chain diagram
-	fmt.Println(ui.RenderChainDiagram(chain))
+	fmt.Println(ui.RenderChainDiagram(chain, 1))
 
 	// OCSP check
 	if len(chain.Certificates) > 0 {

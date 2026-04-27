@@ -125,6 +125,7 @@ Grab the latest binary for your platform from the [Releases](https://github.com/
 | Linux (x86_64) | `peep-linux-amd64` |
 | Linux (ARM64) | `peep-linux-arm64` |
 | Linux (ppc64le) | `peep-linux-ppc64le` |
+| AIX (ppc64) | `peep-aix-ppc64` |
 | Windows (x86_64) | `peep-windows-amd64.exe` |
 
 #### Make it executable and add to your PATH

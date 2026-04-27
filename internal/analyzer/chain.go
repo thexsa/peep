@@ -1,6 +1,7 @@
 package analyzer
 
 import (
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
@@ -31,7 +32,9 @@ func AnalyzeChain(state *tls.ConnectionState, targetHost string, skipVerify bool
 	}
 
 	if !skipVerify && totalCerts > 0 {
-		analysis.TrustStoreVerified, analysis.VerificationError = verifyTrustStore(certs, targetHost)
+		analysis.TrustStoreVerified, analysis.VerificationError,
+			analysis.TrustedRootName, analysis.TrustedRootSerial,
+			analysis.TrustedRootFingerprint = verifyTrustStore(certs, targetHost)
 	}
 
 	analysis.OverallGrade = gradeChain(analysis)
@@ -117,9 +120,11 @@ func checkUnnecessaryRoot(certs []*x509.Certificate) bool {
 	return last.Subject.String() == last.Issuer.String() && last.IsCA
 }
 
-func verifyTrustStore(certs []*x509.Certificate, hostname string) (bool, string) {
+// verifyTrustStore checks the chain against the system trust store.
+// Returns: verified, error, rootName, rootSerial, rootFingerprint.
+func verifyTrustStore(certs []*x509.Certificate, hostname string) (bool, string, string, string, string) {
 	if len(certs) == 0 {
-		return false, "no certificates presented"
+		return false, "no certificates presented", "", "", ""
 	}
 
 	// If the server sent only a leaf cert and it's not self-signed, the chain
@@ -128,7 +133,7 @@ func verifyTrustStore(certs []*x509.Certificate, hostname string) (bool, string)
 	if len(certs) == 1 {
 		leaf := certs[0]
 		if leaf.Subject.String() != leaf.Issuer.String() {
-			return false, "incomplete chain: server sent only the leaf certificate, no intermediate CA"
+			return false, "incomplete chain: server sent only the leaf certificate, no intermediate CA", "", "", ""
 		}
 	}
 
@@ -141,7 +146,7 @@ func verifyTrustStore(certs []*x509.Certificate, hostname string) (bool, string)
 		parent := certs[i+1]
 		if err := child.CheckSignatureFrom(parent); err != nil {
 			return false, fmt.Sprintf("signature verification failed at depth %d: %s did not sign %s",
-				i, parent.Subject.CommonName, child.Subject.CommonName)
+				i, parent.Subject.CommonName, child.Subject.CommonName), "", "", ""
 		}
 	}
 
@@ -162,11 +167,23 @@ func verifyTrustStore(certs []*x509.Certificate, hostname string) (bool, string)
 		Intermediates: intermediates,
 		Roots:         roots,
 	}
-	_, err = certs[0].Verify(opts)
+	chains, err := certs[0].Verify(opts)
 	if err != nil {
-		return false, err.Error()
+		return false, err.Error(), "", "", ""
 	}
-	return true, ""
+
+	// Extract the trusted root from the verified chain.
+	// The root is the last cert in the first verified chain.
+	var rootName, rootSerial, rootFP string
+	if len(chains) > 0 && len(chains[0]) > 0 {
+		root := chains[0][len(chains[0])-1]
+		rootName = root.Subject.CommonName
+		rootSerial = fmt.Sprintf("%X", root.SerialNumber)
+		hash := sha256.Sum256(root.Raw)
+		rootFP = fmt.Sprintf("%X", hash)
+	}
+
+	return true, "", rootName, rootSerial, rootFP
 }
 
 func gradeChain(a ChainAnalysis) HealthStatus {

@@ -188,7 +188,7 @@ func renderReport(report *analyzer.DiagnosticReport) {
 	}
 
 	// Always: Chain diagram (with serial/fingerprint)
-	fmt.Println(ui.RenderChainDiagram(report.Chain))
+	fmt.Println(ui.RenderChainDiagram(report.Chain, flagVerbose))
 
 	// -vv/--verbose: Show PEM encoded certs (after chain)
 	if flagVerbose >= 2 {

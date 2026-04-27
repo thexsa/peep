@@ -10,7 +10,8 @@ import (
 
 // RenderChainDiagram produces a visual chain-of-trust tree.
 // Order: Leaf → Intermediate(s) → Root (as the user reads top to bottom).
-func RenderChainDiagram(chain analyzer.ChainAnalysis) string {
+// verbosity: 0=normal, 1+=show root serial/fingerprint in trust store line
+func RenderChainDiagram(chain analyzer.ChainAnalysis, verbosity int) string {
 	if len(chain.Certificates) == 0 {
 		return Theme.ErrorStyle.Render("No certificates found in chain!")
 	}
@@ -70,7 +71,19 @@ func RenderChainDiagram(chain analyzer.ChainAnalysis) string {
 	// Trust store verification
 	if chain.TrustStoreVerified {
 		lines = append(lines, "")
-		lines = append(lines, Theme.SuccessStyle.Render("[PASS] Chain verified against system trust store"))
+		trustLine := "[PASS] Chain verified against system trust store"
+		if chain.TrustedRootName != "" {
+			trustLine += fmt.Sprintf(" (Trusted Root: %s)", chain.TrustedRootName)
+		}
+		lines = append(lines, Theme.SuccessStyle.Render(trustLine))
+		// In verbose mode, show the root's serial and fingerprint
+		if verbosity >= 1 && chain.TrustedRootSerial != "" {
+			lines = append(lines, Theme.MutedStyle.Render(fmt.Sprintf("%sSerial: %s", noteIndent, chain.TrustedRootSerial)))
+			if chain.TrustedRootFingerprint != "" {
+				fp := formatFingerprint(chain.TrustedRootFingerprint)
+				lines = append(lines, Theme.MutedStyle.Render(fmt.Sprintf("%sSHA-256: %s", noteIndent, fp)))
+			}
+		}
 		lines = append(lines, wrapBlock(chainVerifiedSaying(), noteIndent, noteW, Theme.MutedStyle)...)
 	} else if chain.VerificationError != "" {
 		lines = append(lines, "")

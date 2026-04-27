@@ -179,6 +179,9 @@ type ChainAnalysis struct {
 	ChainOrderCorrect           bool           `json:"chain_order_correct"`
 	TrustStoreVerified          bool           `json:"trust_store_verified"`
 	VerificationError           string         `json:"verification_error,omitempty"`
+	TrustedRootName             string         `json:"trusted_root_name,omitempty"`
+	TrustedRootSerial           string         `json:"trusted_root_serial,omitempty"`
+	TrustedRootFingerprint      string         `json:"trusted_root_fingerprint,omitempty"`
 	OverallGrade                HealthStatus   `json:"overall_grade"`
 }
 

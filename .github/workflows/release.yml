@@ -48,6 +48,9 @@ jobs:
           echo "Building linux/ppc64le..."
           CGO_ENABLED=0 GOOS=linux   GOARCH=ppc64le go build -ldflags="$LDFLAGS" -o dist/peep-linux-ppc64le      ./cmd/peep
 
+          echo "Building aix/ppc64..."
+          CGO_ENABLED=0 GOOS=aix     GOARCH=ppc64   go build -ldflags="$LDFLAGS" -o dist/peep-aix-ppc64          ./cmd/peep
+
           echo "Building windows/amd64..."
           CGO_ENABLED=0 GOOS=windows GOARCH=amd64   go build -ldflags="$LDFLAGS" -o dist/peep-windows-amd64.exe  ./cmd/peep
 
@@ -68,6 +71,7 @@ jobs:
             dist/peep-linux-amd64
             dist/peep-linux-arm64
             dist/peep-linux-ppc64le
+            dist/peep-aix-ppc64
             dist/peep-windows-amd64.exe
             dist/checksums-sha256.txt
 
