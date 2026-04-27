@@ -3,6 +3,7 @@ package analyzer
 import (
 	"crypto/tls"
 	"crypto/x509"
+	"fmt"
 )
 
 // AnalyzeChain performs a full analysis of the certificate chain.
@@ -120,6 +121,28 @@ func verifyTrustStore(certs []*x509.Certificate, hostname string) (bool, string)
 	if len(certs) == 0 {
 		return false, "no certificates presented"
 	}
+
+	// First, verify that the chain the server sent is internally consistent.
+	// Walk each cert pair and confirm the child's signature verifies against
+	// the parent's key. This catches wrong intermediates and broken chains
+	// regardless of what the OS trust store has cached.
+	for i := 0; i < len(certs)-1; i++ {
+		child := certs[i]
+		parent := certs[i+1]
+		if err := child.CheckSignatureFrom(parent); err != nil {
+			return false, fmt.Sprintf("signature verification failed at depth %d: %s did not sign %s",
+				i, parent.Subject.CommonName, child.Subject.CommonName)
+		}
+	}
+
+	// Then verify against the system trust store. Explicitly load the root
+	// pool so Go uses its own chain builder instead of the macOS platform
+	// verifier (which can fetch intermediates via AIA and use cached certs).
+	roots, err := x509.SystemCertPool()
+	if err != nil {
+		roots = x509.NewCertPool()
+	}
+
 	intermediates := x509.NewCertPool()
 	for _, cert := range certs[1:] {
 		intermediates.AddCert(cert)
@@ -127,8 +150,9 @@ func verifyTrustStore(certs []*x509.Certificate, hostname string) (bool, string)
 	opts := x509.VerifyOptions{
 		DNSName:       hostname,
 		Intermediates: intermediates,
+		Roots:         roots,
 	}
-	_, err := certs[0].Verify(opts)
+	_, err = certs[0].Verify(opts)
 	if err != nil {
 		return false, err.Error()
 	}
