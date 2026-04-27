@@ -122,7 +122,17 @@ func verifyTrustStore(certs []*x509.Certificate, hostname string) (bool, string)
 		return false, "no certificates presented"
 	}
 
-	// First, verify that the chain the server sent is internally consistent.
+	// If the server sent only a leaf cert and it's not self-signed, the chain
+	// is incomplete. Don't even ask Go's Verify() — macOS will find the
+	// intermediate in its Keychain cache and say "it's fine." It's not fine.
+	if len(certs) == 1 {
+		leaf := certs[0]
+		if leaf.Subject.String() != leaf.Issuer.String() {
+			return false, "incomplete chain: server sent only the leaf certificate, no intermediate CA"
+		}
+	}
+
+	// Verify that the chain the server sent is internally consistent.
 	// Walk each cert pair and confirm the child's signature verifies against
 	// the parent's key. This catches wrong intermediates and broken chains
 	// regardless of what the OS trust store has cached.
