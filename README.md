@@ -199,20 +199,28 @@ peep example.com
 # Specific port (always host:port format)
 peep example.com:8443
 
-# Extra cert details (subject, issuer, key info, SANs, etc.)
+# Detailed cert info cards (subject, issuer, key info, SANs, etc.)
+peep -d example.com
+
+# Base64 PEM encoded certs
 peep -v example.com
 
-# Full details + base64 PEM certs
-peep -vv example.com
-# or:
-peep --verbose example.com
+# Raw x509 text output (like openssl x509 -text)
+peep -r example.com
 
 # Explain every issue with fixes and doc references
-peep --explain example.com
+peep -e example.com
 
 # JSON output (for scripting / CI/CD)
-peep --json example.com
-peep --json --explain -vv example.com
+peep -j example.com
+peep -j -e -v example.com
+
+# Save all cert PEMs to files
+peep --save example.com
+
+# Save a specific cert by chain index (0=leaf, 1=intermediate, etc.)
+peep --save=0 example.com
+peep --save=2 example.com
 
 # SMTP (auto-detects STARTTLS)
 peep mail.example.com:587
@@ -221,42 +229,50 @@ peep mail.example.com:587
 peep rdp-server.example.com:3389
 
 # Force protocol on non-standard port
-peep -p smtp mailrelay.internal:2525
+peep -P smtp mailrelay.internal:2525
 
 # Plain text output (no color, no emoji — easy to copy/paste)
-peep --plain-text example.com
+peep -p example.com
 
 # Deep scan (cipher enumeration, OCSP, CT logs)
 peep scan example.com
 
 # Skip trust store verification (for self-signed certs)
-peep --insecure internal-server.local:443
+peep -i internal-server.local:443
 
 # Built-in docs
 peep docs certs
 ```
 
 ### All Flags
-| Flag | Short | Description |
-|------|-------|-------------|
-| `--proto` | `-p` | Force protocol: `tls`, `smtp`, `rdp`, `ldap`, `ftp` |
-| `--explain` | | Explain each issue with fix recommendations and doc references |
-| `-v` | | Extra cert details (subject, issuer, key info, SANs) |
-| `-vv` / `--verbose` | | Max verbosity — includes base64 PEM certs |
-| `--json` | | JSON output for scripting (respects -v, -vv, --explain) |
-| `--plain-text` | | No color, no emoji, no Unicode — easy to copy/paste |
-| `--timeout` | `-t` | Connection timeout in seconds (default: 5) |
-| `--insecure` | | Skip system trust store verification |
+
+Every flag has a standard name and a fun themed alias. Use whichever speaks to you.
+
+| Short | Flag | Themed Alias | Description |
+|-------|------|-------------|-------------|
+| `-d` | `--details` | `--gaze` | Show detailed cert info cards |
+| `-e` | `--explain` | `--whytho` | Explain each issue with fix recommendations and doc references |
+| `-h` | `--help` | `--eye-chart` | Show help |
+| `-i` | `--insecure` | `--blindfold` | Skip system trust store verification |
+| `-j` | `--json` | `--monocle` | JSON output for scripting (respects -d, -v, -e) |
+| `-p` | `--plain-text` | `--shades` | No color, no emoji, no Unicode — easy to copy/paste |
+| `-P` | `--proto` | `--lens` | Force protocol: `tls`, `smtp`, `rdp`, `ldap`, `ftp` |
+| `-r` | `--raw` | `--ogle` | Raw x509 text output for each cert (like `openssl x509 -text`) |
+| `-s` | `--save` | `--polaroid` | Save cert PEM(s) to files. No value = all, or specify index |
+| `-t` | `--timeout` | `--blink` | Connection timeout in seconds (default: 5) |
+| `-v` | `--verbose` | `--stare` | Show base64 PEM encoded certs |
 
 Port is always specified in the host argument: `host:port` (default: 443)
 
 ### Flag Combinations
 Flags work in any order and combine freely:
 ```bash
-peep --json --explain -vv example.com    # Full JSON with explanations and PEM certs
-peep -v --json example.com              # JSON with extra cert details
-peep --explain example.com              # CLI with issue explanations
-peep --plain-text --explain example.com  # Copy/paste friendly with explanations
+peep -j -e -v example.com              # Full JSON with explanations and PEM certs
+peep -d -j example.com                 # JSON with detailed cert info
+peep --whytho example.com              # CLI with issue explanations (themed alias)
+peep --shades --whytho example.com     # Copy/paste friendly with explanations
+peep --polaroid example.com            # Save all cert PEMs (themed alias)
+peep --ogle example.com                # Raw x509 output (themed alias)
 ```
 
 ---

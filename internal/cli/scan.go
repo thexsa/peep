@@ -79,7 +79,7 @@ func runScan(cmd *cobra.Command, args []string) error {
 	fmt.Println(ui.RenderHandshakeCard(handshake))
 
 	// Chain diagram
-	fmt.Println(ui.RenderChainDiagram(chain, 1))
+	fmt.Println(ui.RenderChainDiagram(chain, verbosityLevel()))
 
 	// OCSP check
 	if len(chain.Certificates) > 0 {
@@ -112,9 +112,14 @@ func runScan(cmd *cobra.Command, args []string) error {
 	cipherResult := analyzer.EnumerateCiphers(host, port, timeout)
 	fmt.Println(ui.RenderCipherEnum(cipherResult))
 
-	// Cert cards
+	// Cert cards (always shown in scan, or gated by -d if you prefer)
 	for _, cert := range chain.Certificates {
 		fmt.Println(ui.RenderCertCard(cert))
+	}
+
+	// -r / --raw / --ogle: Show raw x509 text output
+	if flagRaw {
+		renderRawX509(chain)
 	}
 
 	// Overall
@@ -123,6 +128,13 @@ func runScan(cmd *cobra.Command, args []string) error {
 		overallStatus = handshake.OverallGrade
 	}
 	fmt.Println(ui.RenderOverallStatus(overallStatus))
+
+	// Save certs if requested
+	if isSaveRequested(cmd) {
+		if err := saveCerts(chain, host, flagSave); err != nil {
+			fmt.Println(ui.Theme.ErrorStyle.Render(fmt.Sprintf("\n[FAIL] Save error: %s", err)))
+		}
+	}
 
 	return nil
 }
