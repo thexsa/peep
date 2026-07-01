@@ -2,7 +2,6 @@ package ui
 
 import (
 	"fmt"
-	"math/rand"
 
 	"github.com/thexsa/peep/internal/analyzer"
 )
@@ -48,26 +47,26 @@ func RandomSaying(status analyzer.HealthStatus) string {
 	default:
 		return ""
 	}
-	return pool[rand.Intn(len(pool))]
+	return PickSass(pool)
 }
 
 // RandomExpiryComment returns a random quip about cert expiry timing.
 func RandomExpiryComment(daysLeft int) string {
 	if daysLeft > 365 {
-		return longExpirySayings[rand.Intn(len(longExpirySayings))]
+		return PickSass(longExpirySayings)
 	}
 	if daysLeft > 30 {
-		return mediumExpirySayings[rand.Intn(len(mediumExpirySayings))]
+		return PickSass(mediumExpirySayings)
 	}
 	if daysLeft > 14 {
-		return shortExpirySayings[rand.Intn(len(shortExpirySayings))]
+		return PickSass(shortExpirySayings)
 	}
-	return criticalExpirySayings[rand.Intn(len(criticalExpirySayings))]
+	return PickSass(criticalExpirySayings)
 }
 
 // RandomExpiredComment returns a random quip about an expired cert.
 func RandomExpiredComment() string {
-	return expiredSayings[rand.Intn(len(expiredSayings))]
+	return PickSass(expiredSayings)
 }
 
 // RenderOverallStatus renders the overall scan status.
@@ -185,7 +184,7 @@ var criticalExpirySayings = []string{
 
 // RandomScanComment returns a sarcastic remark about the scan duration.
 func RandomScanComment() string {
-	return scanDurationSayings[rand.Intn(len(scanDurationSayings))]
+	return PickSass(scanDurationSayings)
 }
 
 var scanDurationSayings = []string{

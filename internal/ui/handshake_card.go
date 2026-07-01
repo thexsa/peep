@@ -2,7 +2,6 @@ package ui
 
 import (
 	"fmt"
-	"math/rand"
 
 	"github.com/thexsa/peep/internal/analyzer"
 )
@@ -38,28 +37,28 @@ func tlsVersionComment(version string) string {
 			"The gold standard. This is the way.",
 			"TLS 1.3 — fast, secure, and not from the stone age.",
 		}
-		return pool[rand.Intn(len(pool))]
+		return PickSass(pool)
 	case "TLSv1.2":
 		pool := []string{
 			"Fine. Not exciting, but it'll do. Like plain oatmeal.",
 			"Acceptable. Provided the cipher suite isn't garbage.",
 			"TLS 1.2 — the Honda Civic of encryption. Reliable, boring.",
 		}
-		return pool[rand.Intn(len(pool))]
+		return PickSass(pool)
 	case "TLSv1.1":
 		pool := []string{
 			"TLS 1.1?! What year is it? This was deprecated before TikTok existed.",
 			"Deprecated since 2021. You're two protocol generations behind.",
 			"TLS 1.1 — the Internet's equivalent of using a flip phone in 2026.",
 		}
-		return pool[rand.Intn(len(pool))]
+		return PickSass(pool)
 	case "TLSv1.0":
 		pool := []string{
 			"TLS 1.0. NINETEEN NINETY NINE called and wants its protocol back.",
 			"Screen door on a bank vault. Anyone can walk through it.",
 			"This protocol has more holes than Swiss cheese at a shooting range.",
 		}
-		return pool[rand.Intn(len(pool))]
+		return PickSass(pool)
 	default:
 		return ""
 	}

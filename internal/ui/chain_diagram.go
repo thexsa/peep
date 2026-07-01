@@ -2,7 +2,6 @@ package ui
 
 import (
 	"fmt"
-	"math/rand"
 	"strings"
 
 	"github.com/thexsa/peep/internal/analyzer"
@@ -65,7 +64,7 @@ func RenderChainDiagram(chain analyzer.ChainAnalysis, verbosity int) string {
 	if chain.HasUnnecessaryRoot {
 		lines = append(lines, "")
 		lines = append(lines, Theme.WarningStyle.Render("[WARN] Server is sending the Root CA cert — unnecessary"))
-		lines = append(lines, wrapBlock("The root is already in the trust store. You're just wasting bandwidth.", noteIndent, noteW, Theme.MutedStyle)...)
+		lines = append(lines, wrapBlock(PickSass(unnecessaryRootSayings), noteIndent, noteW, Theme.MutedStyle)...)
 	}
 
 	// Trust store verification
@@ -221,15 +220,15 @@ var noIssuingCAChainSayings = []string{
 }
 
 func noIssuingCAChainSaying() string {
-	return noIssuingCAChainSayings[rand.Intn(len(noIssuingCAChainSayings))]
+	return PickSass(noIssuingCAChainSayings)
 }
 
 func chainVerifiedSaying() string {
-	return chainVerifiedSayings[rand.Intn(len(chainVerifiedSayings))]
+	return PickSass(chainVerifiedSayings)
 }
 
 func chainFailedSaying() string {
-	return chainFailedSayings[rand.Intn(len(chainFailedSayings))]
+	return PickSass(chainFailedSayings)
 }
 
 var wrongIntermediateSayings = []string{
@@ -246,5 +245,5 @@ var wrongIntermediateSayings = []string{
 }
 
 func wrongIntermediateSaying() string {
-	return wrongIntermediateSayings[rand.Intn(len(wrongIntermediateSayings))]
+	return PickSass(wrongIntermediateSayings)
 }

@@ -45,6 +45,8 @@ func runScan(cmd *cobra.Command, args []string) error {
 		ui.EnablePlainText()
 	}
 
+	ui.ResetSass()
+
 	target := args[0]
 
 	target = strings.TrimPrefix(target, "https://")

@@ -2,7 +2,6 @@ package ui
 
 import (
 	"fmt"
-	"math/rand"
 	"strings"
 
 	"github.com/thexsa/peep/internal/analyzer"
@@ -101,5 +100,5 @@ var noIssuingCABannerSayings = []string{
 }
 
 func noIssuingCABannerSaying() string {
-	return noIssuingCABannerSayings[rand.Intn(len(noIssuingCABannerSayings))]
+	return PickSass(noIssuingCABannerSayings)
 }

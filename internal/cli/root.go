@@ -225,6 +225,8 @@ func runPeep(cmd *cobra.Command, args []string) error {
 		ui.EnablePlainText()
 	}
 
+	ui.ResetSass()
+
 	target := args[0]
 	host, port := parseTarget(target)
 
