@@ -1,6 +1,7 @@
 package analyzer
 
 import (
+	"bytes"
 	"crypto/x509"
 	"encoding/base64"
 	"fmt"
@@ -71,13 +72,13 @@ func CheckOCSP(cert *x509.Certificate, issuer *x509.Certificate, timeout time.Du
 	} else {
 		// Use POST for large requests
 		resp, err = client.Post(ocspURL, "application/ocsp-request",
-			io.NopCloser(io.Reader(nil))) // We'd need bytes.NewReader(ocspReq) — let's use POST properly
+			bytes.NewReader(ocspReq))
 	}
 
 	if err != nil {
 		// Try POST as fallback
-		resp, err = http.Post(ocspURL, "application/ocsp-request",
-			io.NopCloser(io.Reader(nil)))
+		resp, err = client.Post(ocspURL, "application/ocsp-request",
+			bytes.NewReader(ocspReq))
 		if err != nil {
 			return OCSPResult{
 				Status:       OCSPError,

@@ -242,7 +242,7 @@ func checkChain(chain analyzer.ChainAnalysis) []analyzer.Warning {
 			Title:    "Unnecessary Root CA in Chain",
 			Detail:   "The server is sending the root CA certificate, which clients already have.",
 			Why:      pick(unnecessaryRootSayings),
-			Explain:  "The root CA certificate is already in the client's trust store (OS/browser). Sending it in the TLS handshake adds unnecessary bytes to every connection. It's not harmful, but it's wasteful — especially on high-traffic servers. The correct chain is: leaf → intermediate(s). No root needed.",
+			Explain:  "The root CA certificate is already in the client's trust store (OS/browser). Sending it in the TLS handshake wastes bandwidth on every connection — and on high-traffic servers, those extra bytes add up. Security-wise, the chain still works: the leaf and intermediate are present, so clients can build the full trust path. But here's the key insight: if a client DOESN'T have the root CA in its trust store, sending it over the wire won't help. A client will never trust a Root CA just because a random server handed it over during a handshake — that would defeat the entire point of certificate security. Trust stores are curated by OS vendors (Apple, Microsoft, Mozilla) after extensive vetting, not crowd-sourced from random TLS connections. The correct chain is: leaf → intermediate(s). No root needed. Modern browsers can also fetch missing intermediates via AIA (Authority Information Access) chasing, but non-browser clients (curl, APIs, mobile apps, IoT) cannot — so always include the intermediate, but skip the root.",
 			Fix:      "Remove the root CA certificate from your server's cert chain file. Keep only the leaf and intermediate certificates. The root is already trusted by the client.",
 			DocRef:   "peep docs chain",
 		})
@@ -472,6 +472,14 @@ var unnecessaryRootSayings = []string{
 	"The root cert should NOT be in the chain. It's already trusted by the OS/browser.",
 	"Extra bytes, zero benefit. The root belongs in the trust store, not in the TLS handshake.",
 	"Some load balancers add this automatically. Check your config.",
+	"You brought the whole family tree to a handshake. Root included. Nobody asked.",
+	"The root was already invited to the trust store party. You didn't need to RSVP again.",
+	"Sending the root CA is the TLS equivalent of explaining a joke after everyone already laughed.",
+	"The chain works, but you're mailing your birth certificate with every letter.",
+	"Technically correct — the best kind of correct. Also the most wasteful kind of correct.",
+	"Full chain plus root. It's giving 'reply all to the entire company.'",
+	"Your chain is valid but padded like a resume listing 'proficient in Microsoft Word.'",
+	"The root cert is dead weight. Like packing a parachute for a ground-floor exit.",
 }
 
 var verificationFailedSayings = []string{
@@ -485,4 +493,170 @@ var verificationFailedSayings = []string{
 	"The trust store said no. Browsers say no. Users leave. Revenue drops. Fix the chain.",
 	"This chain is untrusted. Not 'kinda trusted' or 'sometimes trusted.' Untrusted. Period.",
 	"Every client that tries to connect will get an error. Every. Single. One.",
+}
+
+// --- CRL Warning Checking ---
+
+// CheckCRLWarnings examines a CRL result and generates contextual warnings.
+func CheckCRLWarnings(crl analyzer.CRLResult) []analyzer.Warning {
+	var w []analyzer.Warning
+
+	if crl.IsRevoked {
+		w = append(w, analyzer.Warning{
+			Code:     "CRL_REVOKED",
+			Severity: analyzer.WrittenInCrayon,
+			Title:    "Certificate REVOKED (CRL)",
+			Detail:   "The certificate's serial number appears on the CA's Certificate Revocation List.",
+			Why:      pick(crlRevokedSayings),
+			Explain:  "The Certificate Authority has explicitly revoked this certificate by adding its serial number to a signed CRL (Certificate Revocation List). This means the CA no longer considers this certificate valid — it could have been compromised, superseded, or decommissioned. Any client that checks revocation status (via CRL or OCSP) will reject this certificate. The cert may still appear to 'work' in some clients that don't check CRLs, but it is officially untrusted.",
+			Fix:      "This certificate must be replaced. Contact your CA to reissue a new certificate, or use a new key pair if the revocation reason was Key Compromise. After reissuing, deploy the new cert and verify with: peep <host>",
+			DocRef:   "peep docs crl",
+		})
+	}
+
+	if crl.IsStale {
+		w = append(w, analyzer.Warning{
+			Code:     "CRL_STALE",
+			Severity: analyzer.MallCopCredentials,
+			Title:    "Stale CRL — NextUpdate Has Passed",
+			Detail:   "The CRL's NextUpdate timestamp is in the past. The revocation data may be outdated.",
+			Why:      pick(crlStaleSayings),
+			Explain:  "The CRL's NextUpdate field indicates when a fresh CRL should have been published, and that time has passed. This means the revocation data you're relying on is outdated — if the CA revoked any certificates since the last CRL was published, those revocations won't be reflected here. Some strict clients will reject certificates when the CRL is stale. This usually indicates a CA infrastructure issue or a misconfigured CRL refresh schedule.",
+			Fix:      "If this is your CA's CRL: check that the CA's CRL publishing service is running and the refresh schedule is configured correctly. If this is a public CA: the CA may be experiencing an outage — check their status page. Consider enabling OCSP stapling as a complementary revocation mechanism.",
+			DocRef:   "peep docs crl",
+		})
+	}
+
+	if crl.FetchError != "" {
+		w = append(w, analyzer.Warning{
+			Code:     "CRL_FETCH_FAILED",
+			Severity: analyzer.MallCopCredentials,
+			Title:    "CRL Fetch Failed",
+			Detail:   "Could not download or parse the CRL: " + crl.FetchError,
+			Why:      pick(crlFetchFailedSayings),
+			Explain:  "peep attempted to download the CRL from the certificate's CRL Distribution Point (CDP) but failed. Without the CRL, revocation status cannot be verified via this mechanism. The failure could be due to network issues, DNS resolution failure, the CRL endpoint being down, or the CRL file being malformed. Most browsers soft-fail in this scenario (proceed without CRL checking), but this leaves a gap in revocation coverage.",
+			Fix:      "Check the CRL Distribution Point URL in the certificate's extensions. Verify the URL is reachable: curl -I <CDP-URL>. If the URL is unreachable, the CA may be having an outage. If the cert has no CDP, the CA may use OCSP only — check with: peep docs ocsp",
+			DocRef:   "peep docs crl",
+		})
+	}
+
+	return w
+}
+
+// --- OCSP Staple Warning Checking ---
+
+// CheckOCSPStapleWarnings examines an OCSP staple result and generates contextual warnings.
+func CheckOCSPStapleWarnings(staple analyzer.OCSPStapleResult) []analyzer.Warning {
+	var w []analyzer.Warning
+
+	if staple.Status == analyzer.OCSPRevoked {
+		w = append(w, analyzer.Warning{
+			Code:     "OCSP_STAPLE_REVOKED",
+			Severity: analyzer.WrittenInCrayon,
+			Title:    "OCSP Staple Says REVOKED",
+			Detail:   "The server's stapled OCSP response indicates this certificate has been revoked.",
+			Why:      pick(ocspStapleRevokedSayings),
+			Explain:  "The server included an OCSP staple in the TLS handshake, and that staple explicitly says the certificate is REVOKED. This is about as bad as it gets — the server is actively advertising that its own certificate is revoked. The CA has confirmed that this certificate should no longer be trusted. Clients that process the staple will immediately reject the connection. This usually happens when a cert is revoked but the server hasn't been updated with a new cert yet.",
+			Fix:      "Replace this certificate immediately. The CA has revoked it — continuing to use it is pointless. Issue a new cert from your CA, deploy it, and restart the TLS service. If the revocation was due to key compromise (reason code 1), generate a new private key before requesting the new cert. Verify with: peep <host>",
+			DocRef:   "peep docs ocsp",
+		})
+	}
+
+	if staple.IsStale {
+		w = append(w, analyzer.Warning{
+			Code:     "OCSP_STAPLE_STALE",
+			Severity: analyzer.MallCopCredentials,
+			Title:    "Stale OCSP Staple — NextUpdate Has Passed",
+			Detail:   "The stapled OCSP response's NextUpdate is in the past. The revocation data is outdated.",
+			Why:      pick(ocspStapleStaleSayings),
+			Explain:  "The server included an OCSP staple, but its NextUpdate timestamp has already passed. This means the stapled revocation proof is outdated. Strict clients may reject the connection because the staple is no longer considered valid. This typically happens when the server's OCSP stapling refresh mechanism is broken — the server fetched a staple once but never refreshed it. Some web servers (like nginx) cache OCSP responses and need to be configured to refresh them before they expire.",
+			Fix:      "Check your server's OCSP stapling configuration. In nginx: ssl_stapling on; ssl_stapling_verify on; and ensure the resolver directive is set. In Apache: SSLUseStapling on; SSLStaplingCache. Restart the server to force a fresh OCSP fetch. Verify the staple is fresh with: peep <host>",
+			DocRef:   "peep docs ocsp",
+		})
+	}
+
+	if !staple.Present {
+		w = append(w, analyzer.Warning{
+			Code:     "OCSP_STAPLE_MISSING",
+			Severity: analyzer.MallCopCredentials,
+			Title:    "No OCSP Staple Present",
+			Detail:   "The server did not include a stapled OCSP response in the TLS handshake.",
+			Why:      pick(ocspStapleMissingSayings),
+			Explain:  "OCSP stapling allows the server to include a pre-fetched, CA-signed revocation status proof in the TLS handshake. Without it, clients must either (a) query the CA's OCSP responder directly — leaking which sites the user visits to the CA and adding latency, or (b) skip revocation checking entirely (soft-fail). OCSP stapling is the privacy-respecting, performance-friendly approach and is recommended for all TLS servers. If the cert has the Must-Staple extension and the staple is missing, clients MUST reject the connection.",
+			Fix:      "Enable OCSP stapling on your server. In nginx: ssl_stapling on; ssl_stapling_verify on; resolver 8.8.8.8 valid=300s;. In Apache: SSLUseStapling on; SSLStaplingCache shmcb:/tmp/stapling_cache(128000). In HAProxy: bind ... ssl crt /path/to/cert.pem ... (HAProxy staples automatically). After enabling, verify with: peep <host>",
+			DocRef:   "peep docs ocsp",
+		})
+	}
+
+	return w
+}
+
+// --- CRL Saying Pools ---
+
+var crlRevokedSayings = []string{
+	"This cert is on the CA's naughty list. Literally. The CRL has its serial number.",
+	"Revoked. The CA said 'no.' That's it. That's the tweet.",
+	"The CA revoked this cert and published the receipts. It's on the CRL for all to see.",
+	"This certificate has been officially uninvited from the trust party.",
+	"The CRL doesn't lie. This cert's serial number is on the list. Game over.",
+	"Revoked by the CA. That's not a suggestion — it's a death sentence for this cert.",
+	"This cert's serial showed up on the CRL like a name on a no-fly list.",
+	"The CA pulled the plug. This cert is revoked, done, finished. Get a new one.",
+}
+
+var crlStaleSayings = []string{
+	"This CRL is expired. It's like checking yesterday's news for today's weather.",
+	"The CRL's NextUpdate passed. You're flying blind on revocation data.",
+	"Stale CRL. The CA's revocation data is stuck in the past.",
+	"This CRL hasn't been updated since NextUpdate. That's... not how freshness works.",
+	"The CRL expired. Any revocations since then? Who knows! Not you.",
+	"You're trusting revocation data that the CA itself says is outdated. Bold.",
+	"This CRL is past its sell-by date. Would you eat expired yogurt? Same energy.",
+	"NextUpdate was in the past. The CRL is stale. The data is stale. Everything is stale.",
+}
+
+var crlFetchFailedSayings = []string{
+	"Couldn't fetch the CRL. The revocation data is a mystery wrapped in a timeout.",
+	"CRL download failed. Is the CDP URL even reachable? Did anyone check?",
+	"The CRL endpoint ghosted us. No response. No data. No revocation status.",
+	"Failed to fetch the CRL. Without it, we can't tell if this cert was revoked.",
+	"CRL? What CRL? The endpoint didn't respond. Revocation status: ¯\\_(ツ)_/¯",
+	"The CRL Distribution Point is unreachable. Soft-fail it is, apparently.",
+	"Couldn't download the CRL. Either the CA's endpoint is down or the URL is wrong.",
+	"CRL fetch failed. We're basically trusting this cert on vibes alone now.",
+}
+
+// --- OCSP Staple Saying Pools ---
+
+var ocspStapleRevokedSayings = []string{
+	"The server stapled an OCSP response that says REVOKED. It's broadcasting its own failure.",
+	"OCSP staple says revoked. The server is literally telling everyone its cert is dead.",
+	"The server attached proof of its own cert's revocation. That's a new kind of self-own.",
+	"Stapled OCSP: Revoked. The server is handing out its own death certificate.",
+	"The OCSP staple is a signed confession: this cert is revoked. Replace it.",
+	"Server said 'here's my cert' and also 'here's proof my cert is revoked.' Pick a lane.",
+	"A stapled OCSP response that says Revoked. It's like wearing a name tag that says 'FIRED.'",
+	"The server included an OCSP staple. The staple says Revoked. Incredible self-report.",
+}
+
+var ocspStapleStaleSayings = []string{
+	"The OCSP staple expired. The server is stapling yesterday's proof of life.",
+	"Stale OCSP staple. It's like flashing an expired coupon at a bouncer.",
+	"The stapled OCSP response is past NextUpdate. It's no longer proof of anything.",
+	"OCSP staple is stale. The server forgot to refresh it. Classic.",
+	"NextUpdate passed. This OCSP staple is as fresh as last week's sushi.",
+	"The server stapled an outdated OCSP response. Points for trying, minus points for execution.",
+	"Stale staple. The server cached the OCSP response and never looked back.",
+	"This OCSP staple expired. It's giving 'set it and forget it' — emphasis on forget.",
+}
+
+var ocspStapleMissingSayings = []string{
+	"No OCSP staple. Every client has to ask the CA directly. Hope you like latency.",
+	"OCSP stapling is off. The CA now knows every visitor to this site. Privacy? Never heard of it.",
+	"No staple. Clients will either query the CA (slow + privacy leak) or skip revocation checks (yikes).",
+	"OCSP stapling is disabled. It's free, it's fast, it's private. Why isn't it on?",
+	"No OCSP staple present. The server is making every client do the revocation homework.",
+	"Missing OCSP staple. The server said 'checking revocation is YOUR problem now.'",
+	"No staple. If the cert has Must-Staple enabled, this is a connection killer.",
+	"OCSP staple? Absent. Privacy for your users? Also absent. Enable stapling.",
 }

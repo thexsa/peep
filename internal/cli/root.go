@@ -16,6 +16,7 @@ import (
 	"github.com/thexsa/peep/internal/education"
 	"github.com/thexsa/peep/internal/probe"
 	"github.com/thexsa/peep/internal/ui"
+	"github.com/thexsa/peep/internal/updater"
 )
 
 var (
@@ -105,7 +106,85 @@ func init() {
 // Execute runs the root command.
 func Execute() error {
 	preprocessSaveArgs()
-	return rootCmd.Execute()
+
+	// Start background update check (non-blocking)
+	updateCh := startBackgroundUpdateCheck()
+
+	err := rootCmd.Execute()
+
+	// Print update notification after all output
+	printUpdateNotification(updateCh)
+
+	return err
+}
+
+// startBackgroundUpdateCheck kicks off a goroutine that checks
+// GitHub for a newer version. Returns a channel that will receive
+// the result (or be closed on skip/error).
+func startBackgroundUpdateCheck() <-chan *updater.UpdateInfo {
+	ch := make(chan *updater.UpdateInfo, 1)
+
+	// Skip conditions
+	if Version == "dev" || Version == "" {
+		close(ch)
+		return ch
+	}
+	if os.Getenv("PEEP_NO_UPDATE_CHECK") != "" {
+		close(ch)
+		return ch
+	}
+
+	go func() {
+		defer close(ch)
+
+		// Check cache first — already checked recently?
+		if !updater.ShouldCheck() {
+			if latest, ok := updater.GetCachedResult(); ok {
+				current := updater.NormalizeVersion(Version)
+				if updater.IsNewer(current, latest) {
+					ch <- &updater.UpdateInfo{
+						CurrentVersion:  current,
+						LatestVersion:   latest,
+						UpdateAvailable: true,
+					}
+				}
+			}
+			return
+		}
+
+		// Not cached or stale — check GitHub
+		info, err := updater.CheckForUpdate(Version)
+		if err != nil {
+			return // silent fail
+		}
+
+		// Save to cache regardless of result
+		updater.SaveCheckResult(info.LatestVersion)
+
+		if info.UpdateAvailable {
+			ch <- info
+		}
+	}()
+
+	return ch
+}
+
+// printUpdateNotification reads from the channel and prints
+// a one-liner if an update is available.
+func printUpdateNotification(ch <-chan *updater.UpdateInfo) {
+	if ch == nil {
+		return
+	}
+
+	// Non-blocking read with a short timeout so we don't delay exit
+	select {
+	case info, ok := <-ch:
+		if ok && info != nil && info.UpdateAvailable {
+			fmt.Print(ui.RenderUpdateNotification(info.CurrentVersion, info.LatestVersion))
+		}
+	case <-time.After(3 * time.Second):
+		// Check took too long, skip notification
+	}
 }
 
 // preprocessSaveArgs rewrites os.Args so that `-s 0` and `--save 2` work

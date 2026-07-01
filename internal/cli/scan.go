@@ -9,20 +9,23 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/thexsa/peep/internal/analyzer"
+	"github.com/thexsa/peep/internal/education"
 	"github.com/thexsa/peep/internal/probe"
 	"github.com/thexsa/peep/internal/ui"
 )
 
 var scanCmd = &cobra.Command{
 	Use:   "scan <host>[:<port>]",
-	Short: "Deep scan — cipher enumeration, OCSP, and CT log checks",
+	Short: "Deep scan — cipher enumeration, OCSP, CRL, and CT log checks",
 	Long: `Perform a deep scan including:
 
   - All checks from the default 'peep' command
+  - OCSP staple check (did the server staple an OCSP response?)
+  - OCSP revocation check (live query to the CA's OCSP responder)
+  - CRL revocation check (fetch and parse the Certificate Revocation List)
+  - Certificate Transparency log verification
   - Cipher suite enumeration (which ciphers does the server support?)
   - TLS version probing (which versions are enabled?)
-  - OCSP revocation checking (has the cert been revoked?)
-  - Certificate Transparency log verification
 
 Note: This scan takes longer due to multiple connection probes.
 
@@ -81,11 +84,27 @@ func runScan(cmd *cobra.Command, args []string) error {
 	// Chain diagram
 	fmt.Println(ui.RenderChainDiagram(chain, verbosityLevel()))
 
-	// OCSP check
+	// Revocation checks
 	if len(chain.Certificates) > 0 {
 		leaf := chain.Certificates[0]
-		fmt.Println(ui.Theme.MutedStyle.Render("  Checking OCSP revocation status..."))
 
+		// OCSP Staple check (uses the TLS connection state)
+		if len(result.ConnState.PeerCertificates) >= 2 {
+			fmt.Println(ui.Theme.MutedStyle.Render("  Checking stapled OCSP response..."))
+			stapleResult := analyzer.CheckOCSPStaple(result.ConnState, result.ConnState.PeerCertificates[1])
+			fmt.Println(ui.RenderOCSPStapleResult(stapleResult))
+
+			// Collect OCSP staple warnings
+			stapleWarnings := education.CheckOCSPStapleWarnings(stapleResult)
+			for _, w := range stapleWarnings {
+				if w.Severity > chain.OverallGrade {
+					chain.OverallGrade = w.Severity
+				}
+			}
+		}
+
+		// Active OCSP check
+		fmt.Println(ui.Theme.MutedStyle.Render("  Checking OCSP revocation status..."))
 		if len(result.ConnState.PeerCertificates) >= 2 {
 			ocspResult := analyzer.CheckOCSP(
 				result.ConnState.PeerCertificates[0],
@@ -99,6 +118,25 @@ func runScan(cmd *cobra.Command, args []string) error {
 		} else {
 			fmt.Println(ui.Theme.MutedStyle.Render("  Skipping OCSP — no issuer cert available"))
 			fmt.Println()
+		}
+
+		// CRL check
+		if len(result.ConnState.PeerCertificates) >= 2 {
+			fmt.Println(ui.Theme.MutedStyle.Render("  Checking CRL revocation status..."))
+			crlResult := analyzer.CheckCRL(
+				result.ConnState.PeerCertificates[0],
+				result.ConnState.PeerCertificates[1],
+				timeout,
+			)
+			fmt.Println(ui.RenderCRLResult(crlResult))
+
+			// Collect CRL warnings
+			crlWarnings := education.CheckCRLWarnings(crlResult)
+			for _, w := range crlWarnings {
+				if w.Severity > chain.OverallGrade {
+					chain.OverallGrade = w.Severity
+				}
+			}
 		}
 
 		// CT log check
@@ -138,3 +176,4 @@ func runScan(cmd *cobra.Command, args []string) error {
 
 	return nil
 }
+

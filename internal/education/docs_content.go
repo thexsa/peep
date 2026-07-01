@@ -21,6 +21,9 @@ func GetTopics() []Topic {
 		topicCerts(),
 		topicChain(),
 		topicCiphers(),
+		topicCRL(),
+		topicOCSP(),
+		topicAIA(),
 		topicStartTLS(),
 		topicRDP(),
 		topicTroubleshooting(),
@@ -333,6 +336,26 @@ If any link in this chain is broken → 🔴 CONNECTION REFUSED.
   ⚠️  Unnecessary Root:
      The server sends the root CA cert. Not harmful, but pointless —
      the client already has it. Just wastes bandwidth.
+
+──────────────────────────────────────────────────────
+📦 CHAIN COMPOSITION — WHAT THE SERVER SHOULD SEND
+──────────────────────────────────────────────────────
+
+  What the server sends       Verdict       Why
+  ─────────────────────────   ───────────   ─────────────────────────────────
+  Leaf only                   ❌ BROKEN      No chain — clients can't verify
+  Leaf + Intermediate(s)      ✅ OPTIMAL     Gold standard — this is correct
+  Leaf + Root (no inter.)     ❌ BROKEN      Missing the link between leaf & root
+  Leaf + Inter. + Root        ⚠️  SUBOPTIMAL  Works but wastes bytes; root can't
+                                             establish trust from the wire
+
+  Key insight: If a client doesn't have the Root CA in its trust
+  store, sending it won't help — a client will never trust a Root CA
+  just because a random server handed it over. Trust stores are curated
+  by OS vendors (Apple, Microsoft, Mozilla) after extensive vetting,
+  not crowd-sourced from random TLS connections.
+
+  See also: peep docs aia
 `,
 	}
 }
@@ -403,6 +426,93 @@ That breaks down into:
     even though plain HTTPS (HTTP/1.1) might work fine
   💡 If HTTP/2 works but HTTP/1.1 falls back to a weaker cipher, that's
      a sign your server's cipher config needs attention.
+
+──────────────────────────────────────────────────────
+☠️  WHY SPECIFIC CIPHERS ARE DANGEROUS
+──────────────────────────────────────────────────────
+
+  Cipher/Mode     Attack           Year   Impact
+  ──────────────  ───────────────  ─────  ──────────────────────────────────
+  RC4             Bar-mitzvah/     2013+  Statistical biases leak plaintext;
+                  Royal cipher            banned by RFC 7465 (2015)
+  AES-CBC         BEAST            2011   Chosen-plaintext IV attack on
+                                          TLS 1.0 CBC; client-side exploit
+  AES-CBC         Lucky13          2013   Timing side-channel in CBC
+                                          padding verification
+  SSLv3 + CBC     POODLE           2014   Padding oracle; killed SSL 3.0
+  3DES/Blowfish   Sweet32          2016   Birthday-bound collision after
+                                          ~32 GB; practical in long sessions
+  DES             Brute force      1999   56-bit key cracked in <24 hrs
+  NULL            (none needed)    —      Literally no encryption at all
+  EXPORT          FREAK/Logjam     2015   Intentionally weak keys (40–512
+                                          bit); Cold War–era US export law
+
+──────────────────────────────────────────────────────
+🔑 FORWARD SECRECY — ECDHE vs RSA KEY EXCHANGE
+──────────────────────────────────────────────────────
+
+  Forward Secrecy (aka Perfect Forward Secrecy / PFS) means that
+  compromising the server's long-term private key does NOT compromise
+  past TLS sessions. Each session uses a fresh, ephemeral key pair.
+
+  Key Exchange   Forward Secrecy?   How it works
+  ───────────    ────────────────   ──────────────────────────────────
+  RSA            ❌ No               Client encrypts a secret with the
+                                    server's RSA public key. If that
+                                    key leaks, all past traffic is
+                                    decryptable. Game over.
+  ECDHE          ✅ Yes              Both sides generate a fresh
+                                    elliptic-curve key pair PER
+                                    session. The shared secret is
+                                    never transmitted. If the server's
+                                    long-term key leaks, past sessions
+                                    are safe.
+  DHE            ✅ Yes              Same idea as ECDHE, but with
+                                    classical Diffie-Hellman. Slower
+                                    and requires larger parameters.
+
+  ⚠️  TLS 1.3 removed RSA key exchange entirely.
+  💡 If your cipher suite name contains "ECDHE" or "DHE," you have
+     Forward Secrecy. If it starts with "TLS_RSA_WITH_", you don't.
+
+──────────────────────────────────────────────────────
+🛡️ AEAD vs CBC — ENCRYPTION MODES
+──────────────────────────────────────────────────────
+
+  AEAD (Authenticated Encryption with Associated Data):
+    • Encrypts AND authenticates in a single operation
+    • Examples: AES-128-GCM, AES-256-GCM, ChaCha20-Poly1305
+    • Immune to padding oracle attacks (no padding!)
+    • TLS 1.3 ONLY allows AEAD ciphers
+
+  CBC (Cipher Block Chaining):
+    • Encrypts in blocks, then uses a separate MAC for authentication
+    • Vulnerable to timing attacks (Lucky13), padding oracles (POODLE)
+    • The encrypt-then-MAC vs MAC-then-encrypt debate haunted TLS for years
+    • Still allowed in TLS 1.2 but blacklisted by HTTP/2
+
+  Rule of thumb: If the cipher name ends in "-GCM" or is "ChaCha20-
+  Poly1305," it's AEAD. If it says "-CBC," it's the old mode.
+
+──────────────────────────────────────────────────────
+🚫 HTTP/2 CIPHER BLACKLIST — DETAILS
+──────────────────────────────────────────────────────
+
+  RFC 7540 (HTTP/2) maintains a blacklist of TLS 1.2 cipher suites
+  that MUST NOT be used with HTTP/2. Key entries:
+
+  • All AES-CBC suites (e.g., TLS_RSA_WITH_AES_128_CBC_SHA)
+  • All RC4 suites
+  • All NULL / anon / EXPORT suites
+  • Static RSA key exchange (no forward secrecy)
+  • 3DES suites
+
+  If your server negotiates an HTTP/2 connection with a blacklisted
+  cipher, the client MUST treat it as a connection error (INADEQUATE_
+  SECURITY). In practice, browsers will fall back to HTTP/1.1.
+
+  💡 If peep shows HTTP/2 but a CBC cipher → something is misconfigured.
+     If peep shows HTTP/1.1 when you expected HTTP/2 → check ciphers.
 `,
 	}
 }
@@ -572,6 +682,439 @@ When something's wrong with TLS, here's your checklist:
 
 💡 PRO TIP: Use -v for detailed cert info, or -vv for PEM encoded certs:
    peep -v <host>
+`,
+	}
+}
+
+func topicCRL() Topic {
+	return Topic{
+		Name:    "crl",
+		Title:   "CRL — Certificate Revocation Lists",
+		Summary: "How CRLs work, freshness, HTTPS pitfalls, and CRL vs OCSP.",
+		Content: `
+🗑️  CRL — Certificate Revocation Lists
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+A CRL is a signed list of revoked certificate serial numbers published
+by a Certificate Authority (CA). When a cert is compromised, stolen,
+or decommissioned early, the CA adds its serial to the CRL so relying
+parties know to reject it.
+
+──────────────────────────────────────────────────────
+📍 CRL DISTRIBUTION POINTS (CDPs)
+──────────────────────────────────────────────────────
+
+  CDPs are URLs embedded in the certificate's X.509 extensions that
+  tell clients where to download the CRL. A certificate can have
+  multiple CDPs for redundancy. Example (from a cert extension):
+
+    CRL Distribution Points:
+      URI: http://crl.example-ca.com/intermediate.crl
+
+  💡 CDPs are usually HTTP (not HTTPS) — see below for why.
+
+──────────────────────────────────────────────────────
+🔄 CRL LIFECYCLE
+──────────────────────────────────────────────────────
+
+  Every CRL contains two critical timestamps:
+
+  Field           Meaning
+  ─────────────   ──────────────────────────────────────────
+  ThisUpdate      When this CRL was published / became valid
+  NextUpdate      When clients should fetch a newer CRL
+
+  Typical refresh intervals:
+    • Public CAs: every 1–7 days
+    • Enterprise / internal CAs: every 1–24 hours
+    • High-security environments: every 1–6 hours
+
+──────────────────────────────────────────────────────
+⏰ FRESHNESS & STALENESS
+──────────────────────────────────────────────────────
+
+  When NextUpdate passes and a client can't fetch a newer CRL:
+    • Some clients reject the cert outright (hard-fail)
+    • Some clients proceed anyway (soft-fail) — this is the default
+      in most browsers
+    • Some clients use cached CRLs for a grace period
+
+  A stale CRL is dangerous: if a cert was revoked AFTER the last CRL
+  was published, clients with the stale CRL won't know. They'll accept
+  a compromised certificate as valid.
+
+──────────────────────────────────────────────────────
+🐔 HTTPS CRL ENDPOINTS — THE CHICKEN-AND-EGG PROBLEM
+──────────────────────────────────────────────────────
+
+  Why are most CDP URLs plain HTTP instead of HTTPS?
+
+  To validate an HTTPS CRL endpoint, the client needs to verify the
+  endpoint's own TLS certificate. That cert might itself need a CRL
+  check — creating a circular dependency. The client can't validate
+  the CRL server's cert without a CRL, and can't get the CRL without
+  validating the server.
+
+  This is why almost all CDPs use HTTP:
+    ✅ http://crl.digicert.com/sha2-ev.crl     ← Standard
+    ❌ https://crl.digicert.com/sha2-ev.crl    ← Chicken-and-egg!
+
+  CRLs are cryptographically signed by the CA anyway, so transport-
+  layer encryption isn't needed for integrity — only for privacy
+  (which CRLs don't typically require).
+
+──────────────────────────────────────────────────────
+🚫 CERTS WITHOUT CDPs
+──────────────────────────────────────────────────────
+
+  Some certificates don't include CRL Distribution Points at all.
+  Reasons:
+    • The CA uses OCSP exclusively (see: peep docs ocsp)
+    • Short-lived certs (e.g., Let's Encrypt — 90-day certs with
+      OCSP but no CRL for end-entity certs)
+    • Internal/private PKI with its own revocation mechanism
+    • Root CA certs (roots are never revoked via CRL — they're
+      removed from the trust store directly by OS vendors)
+
+──────────────────────────────────────────────────────
+📋 REVOCATION REASON CODES
+──────────────────────────────────────────────────────
+
+  When a CA revokes a certificate, it assigns a reason code:
+
+  Code  Reason                 When it's used
+  ────  ─────────────────────  ───────────────────────────────────────
+  0     Unspecified            Default when no specific reason given
+  1     Key Compromise         Private key leaked or stolen
+  2     CA Compromise          The issuing CA's key was compromised
+  3     Affiliation Changed    Org changed (e.g., company acquisition)
+  4     Superseded             Replaced by a newer certificate
+  5     Cessation of Operation Service shut down, domain abandoned
+  6     Certificate Hold       Temporarily suspended (can be unrevoked)
+  8     Remove from CRL        Used to "un-hold" a cert (code 6)
+  9     Privilege Withdrawn    Authorization to hold cert was revoked
+  10    AA Compromise          Attribute Authority was compromised
+
+  ⚠️  Code 7 is unused (there is no reason code 7).
+  💡 Code 1 (Key Compromise) is the scariest — it means someone else
+     may have the private key and can impersonate the server.
+
+──────────────────────────────────────────────────────
+⚖️  CRL vs OCSP — COMPARISON
+──────────────────────────────────────────────────────
+
+  Feature              CRL                     OCSP
+  ─────────────────    ──────────────────────  ──────────────────────
+  Model                Download full list       Query per-certificate
+  Latency              High (download whole     Low (single request)
+                       file, can be MBs)
+  Freshness            Periodic (hours/days)    Near real-time
+  Bandwidth            Heavy (grows with        Light (single cert)
+                       revocations)
+  Privacy              Better (local check,     Worse without stapling
+                       CA doesn't see queries)  (CA sees every site)
+  Offline support      Yes (cached CRL works)   No (needs network)
+  Server support       Not needed               Can be stapled (preferred)
+  Browser support      Declining (Chrome         Mixed (Firefox uses
+                       removed CRL checking)    CRLite instead)
+
+  💡 Modern best practice: OCSP Stapling + CRL as fallback.
+     See also: peep docs ocsp
+`,
+	}
+}
+
+func topicOCSP() Topic {
+	return Topic{
+		Name:    "ocsp",
+		Title:   "OCSP — Online Certificate Status Protocol",
+		Summary: "Stapled vs live OCSP, status meanings, Must-Staple, and privacy.",
+		Content: `
+🔎 OCSP — Online Certificate Status Protocol
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+OCSP is a real-time protocol for checking whether a specific
+certificate has been revoked. Instead of downloading an entire CRL,
+the client (or server) sends a single query for one certificate's
+serial number and gets back a signed response: Good, Revoked, or
+Unknown.
+
+──────────────────────────────────────────────────────
+📡 TWO MODES: STAPLED vs LIVE
+──────────────────────────────────────────────────────
+
+  1. OCSP Stapling (server-side, preferred):
+     • The SERVER periodically fetches the OCSP response from the CA
+     • During the TLS handshake, the server "staples" the response
+       to the Certificate message
+     • The client gets proof of freshness without contacting the CA
+     • No privacy leak — the CA never sees who's visiting the site
+     • ✅ Fast, private, and reliable
+
+  2. Live OCSP Query (client-side):
+     • The CLIENT connects to the CA's OCSP responder during the
+       TLS handshake
+     • Adds latency (extra network round-trip)
+     • The CA sees every site the client visits (privacy issue)
+     • If the OCSP responder is down, the client must decide:
+       proceed (soft-fail) or abort (hard-fail)
+     • ❌ Slow, leaks privacy, fragile
+
+──────────────────────────────────────────────────────
+🔗 OCSP RESPONDER URLs
+──────────────────────────────────────────────────────
+
+  The OCSP responder URL is found in the certificate's Authority
+  Information Access (AIA) extension:
+
+    Authority Information Access:
+      OCSP - URI: http://ocsp.digicert.com
+
+  Like CRL CDPs, OCSP responder URLs are typically HTTP (not HTTPS)
+  to avoid the chicken-and-egg TLS validation problem.
+
+──────────────────────────────────────────────────────
+📊 STATUS MEANINGS
+──────────────────────────────────────────────────────
+
+  Status     Meaning
+  ─────────  ────────────────────────────────────────────────
+  Good       Certificate is NOT revoked (as of ThisUpdate)
+  Revoked    Certificate IS revoked — stop trusting it!
+  Unknown    OCSP responder doesn't know about this cert
+             (could mean wrong responder, CA doesn't track
+             it, or serial number not in CA's database)
+
+  ⚠️  "Good" only means "not revoked" — it does NOT validate expiry,
+     hostname, key strength, or anything else about the cert.
+
+──────────────────────────────────────────────────────
+⏰ FRESHNESS: ProducedAt, ThisUpdate, NextUpdate
+──────────────────────────────────────────────────────
+
+  Field           Meaning
+  ─────────────   ──────────────────────────────────────────
+  ProducedAt      When the OCSP responder generated this response
+  ThisUpdate      The most recent time the status was confirmed
+  NextUpdate      When the client should fetch a fresh response
+
+  If NextUpdate has passed and a new response can't be fetched, the
+  stapled response is considered stale. Clients may reject it (strict
+  mode) or proceed anyway (lenient mode).
+
+──────────────────────────────────────────────────────
+📌 OCSP MUST-STAPLE
+──────────────────────────────────────────────────────
+
+  The "OCSP Must-Staple" extension (RFC 7633, OID 1.3.6.1.5.5.7.1.24)
+  is set in the certificate itself. When present:
+
+    • The server MUST include a stapled OCSP response
+    • If the staple is missing, the client MUST reject the connection
+    • This eliminates soft-fail — if the OCSP status can't be verified,
+      the connection dies
+
+  💡 Must-Staple is opt-in per certificate. It's the strongest
+     revocation enforcement available in TLS today.
+
+  ⚠️  If your server doesn't support OCSP stapling and you enable
+     Must-Staple on the cert, ALL connections will fail. Test first.
+
+──────────────────────────────────────────────────────
+🤷 SOFT-FAIL vs HARD-FAIL
+──────────────────────────────────────────────────────
+
+  What happens when the client can't reach the OCSP responder?
+
+  Mode         Behavior                    Who does this
+  ───────────  ────────────────────────    ─────────────────────────
+  Soft-fail    Proceed anyway              Most browsers (Chrome,
+               (assume "Good")             Safari, Edge)
+  Hard-fail    Reject the connection       Firefox (with CRLite),
+               (assume "Revoked")          some enterprise configs
+
+  The problem with soft-fail: an attacker who compromises a cert's
+  private key can ALSO block OCSP queries (by MITMing the OCSP
+  responder URL). The client soft-fails, and the revoked cert works.
+
+  The problem with hard-fail: if the OCSP responder has an outage,
+  EVERY site using that CA becomes unreachable. CAs have outages.
+
+──────────────────────────────────────────────────────
+🦊 CRLite (FIREFOX)
+──────────────────────────────────────────────────────
+
+  Firefox takes a different approach entirely: CRLite.
+
+  Instead of querying OCSP or downloading CRLs, Mozilla pre-computes
+  a compressed bloom-filter of ALL revoked certificates and pushes it
+  to every Firefox installation via Remote Settings.
+
+  Benefits:
+    • No real-time queries (no privacy leak, no latency)
+    • Hard-fail without fragility (data is pre-distributed)
+    • Covers ALL certificates, not just the one being checked
+    • Updated multiple times per day
+
+  This is why Firefox can hard-fail on revocation without causing
+  outages. Other browsers haven't adopted this approach yet.
+
+──────────────────────────────────────────────────────
+🔒 PRIVACY — THE HIDDEN COST OF LIVE OCSP
+──────────────────────────────────────────────────────
+
+  Without OCSP stapling, every time a client connects to a site, it
+  also tells the CA which site it's visiting. The CA's OCSP responder
+  receives:
+    • The certificate serial number (identifies the site)
+    • The client's IP address
+    • The timestamp
+
+  This creates a browsing history at the CA level. CAs promise not to
+  use this data, but the capability exists.
+
+  OCSP Stapling eliminates this entirely — the server fetches the
+  response, the client never contacts the CA.
+
+  💡 This is one of the strongest arguments for OCSP Stapling.
+     See also: peep docs aia
+`,
+	}
+}
+
+func topicAIA() Topic {
+	return Topic{
+		Name:    "aia",
+		Title:   "AIA — Authority Information Access & Browser Magic",
+		Summary: "How browsers fetch missing certs, and why \"works in Chrome\" isn't enough.",
+		Content: `
+🪄 AIA — Authority Information Access & Browser Magic
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+AIA is an X.509 certificate extension that contains two important URLs:
+
+  1. caIssuers — URL to download the issuing CA's certificate
+     (the intermediate that signed this cert)
+  2. OCSP — URL of the OCSP responder for revocation checks
+
+Example (from a cert's extensions):
+  Authority Information Access:
+    CA Issuers - URI: http://certs.digicert.com/DigiCertSHA2EV.crt
+    OCSP - URI: http://ocsp.digicert.com
+
+──────────────────────────────────────────────────────
+🔍 AIA CHASING — HOW BROWSERS FETCH MISSING INTERMEDIATES
+──────────────────────────────────────────────────────
+
+  When a server doesn't send the intermediate certificate, some
+  clients can "chase" the AIA caIssuers URL to fetch the missing cert:
+
+    1. Client receives the leaf cert from the server
+    2. Leaf cert has AIA caIssuers → http://certs.ca.com/intermediate.crt
+    3. Client downloads the intermediate
+    4. Client builds the chain: leaf → intermediate → root
+    5. Connection succeeds ✅
+
+  This is called "AIA chasing" or "AIA fetching."
+
+──────────────────────────────────────────────────────
+💥 THE "WORKS IN CHROME BUT BREAKS EVERYWHERE ELSE" PROBLEM
+──────────────────────────────────────────────────────
+
+  Chrome (and most browsers) do AIA chasing automatically. So if your
+  server is missing the intermediate cert, Chrome will silently fetch
+  it and everything looks fine.
+
+  But these clients do NOT do AIA chasing:
+    ❌ curl / wget / libcurl-based tools
+    ❌ OpenSSL CLI (openssl s_client)
+    ❌ Python (requests, urllib3, httpx)
+    ❌ Go (net/http)
+    ❌ Java (HttpsURLConnection, OkHttp)
+    ❌ Node.js (https module)
+    ❌ Mobile apps (iOS URLSession, Android OkHttp)
+    ❌ IoT devices and embedded systems
+    ❌ API gateways and service mesh proxies
+
+  These clients expect the server to send the complete chain. If the
+  intermediate is missing, they fail with errors like:
+    • "unable to get local issuer certificate"
+    • "SSL certificate problem: unable to verify"
+    • "PKIX path building failed"
+    • "certificate verify failed"
+
+  💡 peep deliberately does NOT do AIA chasing — it shows you what
+     non-browser clients see. If peep reports a missing intermediate,
+     your server is broken for a large portion of the Internet.
+
+──────────────────────────────────────────────────────
+🍎 macOS KEYCHAIN MAGIC
+──────────────────────────────────────────────────────
+
+  macOS has an extra layer of "helpful" behavior: the system Keychain
+  caches intermediate certificates globally. If Safari or any macOS
+  app fetches an intermediate via AIA, it gets stored in the Keychain
+  and is available to ALL apps on that machine.
+
+  This means:
+    • You visit a site in Safari → intermediate gets cached
+    • You run curl → curl "works" because macOS provides the cached
+      intermediate from the Keychain
+    • You think your server's chain is fine
+    • You deploy to a Linux server / Docker container / CI → BROKEN
+
+  peep bypasses the macOS Keychain deliberately. It verifies the chain
+  using ONLY the certificates the server sent in the TLS handshake,
+  plus the system root trust store. No AIA chasing, no cached
+  intermediates. What peep shows you is what curl on a fresh Linux
+  box would see.
+
+──────────────────────────────────────────────────────
+🛡️  WHY YOU CAN'T TRUST A ROOT CA FROM THE WIRE
+──────────────────────────────────────────────────────
+
+  Sometimes people ask: "If the server sends the root CA cert, why
+  doesn't the client just trust it?"
+
+  Because that would defeat the entire purpose of certificate security.
+
+  Trust stores are curated lists of Root CAs maintained by:
+    • Apple (macOS, iOS)
+    • Microsoft (Windows)
+    • Mozilla (Firefox, used by many Linux distros)
+    • Google (Chrome Root Program)
+
+  These vendors vet CAs through extensive audits (WebTrust, ETSI),
+  require compliance with CA/Browser Forum Baseline Requirements,
+  and can REMOVE CAs that misbehave (see: Symantec, WoSign, CNNIC).
+
+  If any server could make a client trust a new Root CA just by
+  sending it during a TLS handshake, an attacker could:
+    1. Create their own Root CA
+    2. Issue a cert for any domain (google.com, your-bank.com)
+    3. MITM your connection and send their fake root + fake cert
+    4. Your client would "trust" it → complete security failure
+
+  This is why root CAs are NEVER trusted from the wire. They must
+  be pre-installed in the OS trust store through a controlled process.
+
+──────────────────────────────────────────────────────
+📦 THE CORRECT CHAIN COMPOSITION
+──────────────────────────────────────────────────────
+
+  What the server should send:
+
+    ✅ Leaf cert + Intermediate(s)
+
+  What the server should NOT send:
+
+    ❌ Leaf only (broken for non-AIA clients)
+    ❌ Leaf + Root (missing intermediate, root is wasted bytes)
+    ⚠️  Leaf + Intermediate + Root (works, but root is dead weight)
+
+  The root cert belongs in the trust store, not in the TLS handshake.
+
+  See also: peep docs chain, peep docs ocsp, peep docs crl
 `,
 	}
 }

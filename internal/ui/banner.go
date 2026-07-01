@@ -67,14 +67,22 @@ func RenderSummaryHeader(host, port, ip, protocol string, report *analyzer.Diagn
 	return ApplyBorder(lines, HeaderBorder)
 }
 
-// RenderVersion displays the version banner.
-func RenderVersion(version string) string {
+// RenderVersion displays the version banner with install method and platform.
+func RenderVersion(version, installMethod, platform string) string {
 	logo := Theme.BoldStyle.Render(fmt.Sprintf("peep %s", version))
+	meta := Theme.MutedStyle.Render(fmt.Sprintf("(%s, %s)", installMethod, platform))
 	tagline := Theme.MutedStyle.Render("Your digital eyes for TLS diagnostics.")
 	built := Theme.MutedStyle.Render("Built with pure Go — no OpenSSL required.")
 
-	content := strings.Join([]string{logo, tagline, built}, "\n")
+	content := strings.Join([]string{logo + " " + meta, tagline, built}, "\n")
 	return ApplyBorder([]string{content}, HeaderBorder)
+}
+
+// RenderUpdateNotification returns a styled one-liner for update availability.
+func RenderUpdateNotification(current, latest string) string {
+	return Theme.WarningStyle.Render(
+		fmt.Sprintf("\n  💡 Update available: v%s → v%s (run `peep update` to upgrade)\n", current, latest),
+	)
 }
 
 var noIssuingCABannerSayings = []string{

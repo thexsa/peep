@@ -94,6 +94,9 @@ peep docs tls              # What is TLS?
 peep docs certs            # Leaf vs Intermediate vs Root
 peep docs chain            # How chain of trust works
 peep docs ciphers          # Cipher suites explained
+peep docs crl              # Certificate Revocation Lists
+peep docs ocsp             # OCSP — stapled vs live, Must-Staple
+peep docs aia              # AIA chasing & "works in Chrome" gotcha
 peep docs tls-handshake    # TLS 1.2 vs 1.3 handshake flows
 peep docs starttls         # What STARTTLS is
 peep docs rdp              # Why RDP certs are special
@@ -109,6 +112,20 @@ peep --json --explain example.com | jq '.warnings[].fix'
 
 ### 🌶️ Sarcastic Commentary
 Every finding comes with rotating sarcastic remarks. Because debugging TLS should at least be entertaining.
+
+### 🔄 Self-Update
+peep checks for updates automatically (once every 24 hours) and notifies you after scan output:
+```
+  💡 Update available: v1.3.0 → v1.4.0 (run `peep update` to upgrade)
+```
+
+Update with a single command — peep auto-detects whether you installed via Homebrew or GitHub binary:
+```bash
+peep update              # Update to latest
+peep update --check      # Just check, don't install
+```
+
+Disable automatic checks: set `PEEP_NO_UPDATE_CHECK=1` in your environment.
 
 ---
 
@@ -234,7 +251,7 @@ peep -P smtp mailrelay.internal:2525
 # Plain text output (no color, no emoji — easy to copy/paste)
 peep -p example.com
 
-# Deep scan (cipher enumeration, OCSP, CT logs)
+# Deep scan (cipher enumeration, OCSP staple + live, CRL, CT logs)
 peep scan example.com
 
 # Skip trust store verification (for self-signed certs)
@@ -242,6 +259,12 @@ peep -i internal-server.local:443
 
 # Built-in docs
 peep docs certs
+
+# Check for updates
+peep update --check
+
+# Update to latest version
+peep update
 ```
 
 ### All Flags
@@ -261,6 +284,16 @@ Every flag has a standard name and a fun themed alias. Use whichever speaks to y
 | `-s` | `--save` | `--polaroid` | Save cert PEM(s) to files. No value = all, or specify index |
 | `-t` | `--timeout` | `--blink` | Connection timeout in seconds (default: 5) |
 | `-v` | `--verbose` | `--stare` | Show base64 PEM encoded certs |
+
+#### Subcommands
+
+| Command | Description |
+|---------|-------------|
+| `peep scan <host>` | Deep scan with cipher enumeration, OCSP, CRL, CT logs |
+| `peep docs [topic]` | Built-in TLS reference |
+| `peep update` | Update peep to the latest version |
+| `peep update --check` | Check for updates without installing |
+| `peep version` | Show version, install method, and platform |
 
 Port is always specified in the host argument: `host:port` (default: 443)
 
