@@ -143,7 +143,7 @@ func runScan(cmd *cobra.Command, args []string) error {
 
 		// CT log check
 		fmt.Println(ui.Theme.MutedStyle.Render("  Checking Certificate Transparency logs..."))
-		ctResult := analyzer.CheckCTLogs(leaf.SerialNumber, leaf.CommonName, timeout*2)
+		ctResult := analyzer.CheckCTLogs(leaf.SerialNumber, leaf.CommonName, chain.TrustStoreVerified)
 		fmt.Println(ui.RenderCTLogResult(ctResult))
 	}
 

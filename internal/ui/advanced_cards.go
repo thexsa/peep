@@ -168,6 +168,9 @@ func RenderCTLogResult(result analyzer.CTLogResult) string {
 		if result.FirstSeen != "" {
 			lines = append(lines, renderKV("First Seen", result.FirstSeen))
 		}
+	} else if result.IsPrivateCA {
+		lines = append(lines, renderKV("Status", Theme.MutedStyle.Render("Skipped — private/internal CA")))
+		lines = append(lines, renderKV("", Theme.MutedStyle.Render(PickSass(ctPrivateCASayings))))
 	} else {
 		lines = append(lines, renderKV("Status", Theme.WarningStyle.Render("Not in CT logs")))
 		lines = append(lines, renderKV("", Theme.MutedStyle.Render(PickSass(ctNotFoundSayings))))
@@ -361,6 +364,17 @@ var ctNotFoundSayings = []string{
 	"CT logs: 'never seen this cert before.' Make of that what you will.",
 	"Not logged in CT. Chrome and Safari might have opinions about this.",
 	"Zero CT log entries. If this cert is older than 24 hours, that's a red flag.",
+}
+
+var ctPrivateCASayings = []string{
+	"CT logs only track publicly-trusted CAs. Your internal CA isn't in the club.",
+	"Private CAs don't submit to CT logs. This is expected, not suspicious.",
+	"No public CT logs for internal certs — that's by design, not a problem.",
+	"CT is for public trust. Your enterprise CA has its own trust model.",
+	"Internal CAs live outside the public CT ecosystem. Nothing to see here.",
+	"Public CT logs wouldn't know what to do with this cert even if you submitted it.",
+	"Your internal PKI, your rules. CT logs are a public trust mechanism.",
+	"This cert chains to a private root. CT logging doesn't apply here.",
 }
 
 // --- Unnecessary root sass pool ---

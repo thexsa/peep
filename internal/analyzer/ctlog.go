@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -17,6 +18,7 @@ type CTLogResult struct {
 	Error         string
 	SCTCount      int  // Number of SCTs embedded in the cert
 	HasSCTs       bool // Whether the cert has embedded SCTs
+	IsPrivateCA   bool // Whether the issuing CA is private (not publicly trusted)
 }
 
 // crtShResponse represents the response from crt.sh API.
@@ -32,9 +34,18 @@ type crtShResponse struct {
 	EntryTimestamp string `json:"entry_timestamp"`
 }
 
+const (
+	crtShTimeout     = 30 * time.Second
+	crtShMaxRetries  = 2
+	crtShRetryDelay  = 2 * time.Second
+)
+
 // CheckCTLogs checks Certificate Transparency logs for the given certificate
 // using the crt.sh API (which aggregates multiple CT logs).
-func CheckCTLogs(serialNumber string, commonName string, timeout time.Duration) CTLogResult {
+//
+// If trustStoreVerified is false, the cert is likely from a private/internal CA
+// and will never appear in public CT logs — we skip the check and note this.
+func CheckCTLogs(serialNumber string, commonName string, trustStoreVerified bool) CTLogResult {
 	result := CTLogResult{}
 
 	if serialNumber == "" {
@@ -42,62 +53,84 @@ func CheckCTLogs(serialNumber string, commonName string, timeout time.Duration) 
 		return result
 	}
 
-	// Query crt.sh by serial number
-	url := fmt.Sprintf("https://crt.sh/?serial=%s&output=json", serialNumber)
-
-	client := &http.Client{Timeout: timeout}
-	resp, err := client.Get(url)
-	if err != nil {
-		result.Error = fmt.Sprintf("failed to query crt.sh: %s", err)
-		return result
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		result.Error = fmt.Sprintf("crt.sh returned status %d", resp.StatusCode)
-		return result
-	}
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		result.Error = fmt.Sprintf("failed to read crt.sh response: %s", err)
-		return result
-	}
-
-	var entries []crtShResponse
-	if err := json.Unmarshal(body, &entries); err != nil {
-		// crt.sh returns empty array or error page
-		if len(body) < 10 {
-			result.Found = false
-			return result
-		}
-		result.Error = fmt.Sprintf("failed to parse crt.sh response: %s", err)
-		return result
-	}
-
-	if len(entries) == 0 {
+	// Private CA: certs from internal CAs will never be in public CT logs
+	if !trustStoreVerified {
+		result.IsPrivateCA = true
 		result.Found = false
 		return result
 	}
 
-	result.Found = true
-	result.LogCount = len(entries)
+	// Query crt.sh by serial number (lowercase hex, no leading zeros issues)
+	serial := strings.ToLower(serialNumber)
+	url := fmt.Sprintf("https://crt.sh/?serial=%s&output=json", serial)
 
-	// Collect unique log names and find earliest entry
-	logSet := make(map[string]bool)
-	earliest := ""
-	for _, entry := range entries {
-		logSet[entry.IssuerName] = true
-		if earliest == "" || entry.EntryTimestamp < earliest {
-			earliest = entry.EntryTimestamp
+	var lastErr error
+	for attempt := 0; attempt <= crtShMaxRetries; attempt++ {
+		if attempt > 0 {
+			time.Sleep(crtShRetryDelay)
 		}
+
+		client := &http.Client{Timeout: crtShTimeout}
+		resp, err := client.Get(url)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+
+		body, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			lastErr = fmt.Errorf("crt.sh returned status %d", resp.StatusCode)
+			continue
+		}
+
+		if err != nil {
+			lastErr = fmt.Errorf("failed to read response: %s", err)
+			continue
+		}
+
+		var entries []crtShResponse
+		if err := json.Unmarshal(body, &entries); err != nil {
+			// crt.sh returns empty array or error page for not-found
+			if len(body) < 10 {
+				result.Found = false
+				return result
+			}
+			lastErr = fmt.Errorf("failed to parse response: %s", err)
+			continue
+		}
+
+		if len(entries) == 0 {
+			result.Found = false
+			return result
+		}
+
+		result.Found = true
+		result.LogCount = len(entries)
+
+		// Collect unique log names and find earliest entry
+		logSet := make(map[string]bool)
+		earliest := ""
+		for _, entry := range entries {
+			logSet[entry.IssuerName] = true
+			if earliest == "" || entry.EntryTimestamp < earliest {
+				earliest = entry.EntryTimestamp
+			}
+		}
+
+		for name := range logSet {
+			result.LogNames = append(result.LogNames, name)
+		}
+		result.FirstSeen = earliest
+
+		return result
 	}
 
-	for name := range logSet {
-		result.LogNames = append(result.LogNames, name)
+	// All retries exhausted
+	if lastErr != nil {
+		result.Error = fmt.Sprintf("failed to query crt.sh: %s", lastErr)
 	}
-	result.FirstSeen = earliest
-
 	return result
 }
 
