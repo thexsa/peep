@@ -159,14 +159,22 @@ func RenderCTLogResult(result analyzer.CTLogResult) string {
 	lines = append(lines, header)
 	lines = append(lines, "")
 
-	if result.Error != "" {
+	if result.RateLimited {
+		lines = append(lines, renderKV("Status", Theme.WarningStyle.Render("Rate limited — try again later")))
+		lines = append(lines, renderKV("", Theme.MutedStyle.Render(PickSass(ctRateLimitedSayings))))
+	} else if result.Error != "" {
 		lines = append(lines, renderKV("Status", Theme.WarningStyle.Render("Could not check CT logs")))
 		lines = append(lines, renderKV("Detail", Theme.MutedStyle.Render(result.Error)))
 	} else if result.Found {
 		lines = append(lines, renderKV("Status", Theme.SuccessStyle.Render("Found in CT logs")))
-		lines = append(lines, renderKV("Entries", fmt.Sprintf("%d log entries found", result.LogCount)))
+		if result.LogCount > 0 {
+			lines = append(lines, renderKV("Issuances", fmt.Sprintf("%d+ logged for this domain", result.LogCount)))
+		}
+		if len(result.LogNames) > 0 {
+			lines = append(lines, renderKV("Issuer", result.LogNames[0]))
+		}
 		if result.FirstSeen != "" {
-			lines = append(lines, renderKV("First Seen", result.FirstSeen))
+			lines = append(lines, renderKV("Earliest", result.FirstSeen))
 		}
 	} else if result.IsPrivateCA {
 		lines = append(lines, renderKV("Status", Theme.MutedStyle.Render("Skipped — private/internal CA")))
@@ -175,6 +183,9 @@ func RenderCTLogResult(result analyzer.CTLogResult) string {
 		lines = append(lines, renderKV("Status", Theme.WarningStyle.Render("Not in CT logs")))
 		lines = append(lines, renderKV("", Theme.MutedStyle.Render(PickSass(ctNotFoundSayings))))
 	}
+
+	lines = append(lines, "")
+	lines = append(lines, renderKV("Source", Theme.MutedStyle.Render("Cert Spotter by SSLMate (api.certspotter.com)")))
 
 	return ApplyBorder(lines, SectionBorder) + "\n"
 }
@@ -375,6 +386,15 @@ var ctPrivateCASayings = []string{
 	"Public CT logs wouldn't know what to do with this cert even if you submitted it.",
 	"Your internal PKI, your rules. CT logs are a public trust mechanism.",
 	"This cert chains to a private root. CT logging doesn't apply here.",
+}
+
+var ctRateLimitedSayings = []string{
+	"100 queries/hour is the free tier. You've been busy.",
+	"Cert Spotter said 'slow down.' Try again in a few minutes.",
+	"Rate limited. The free tier has limits. This is one of them.",
+	"You've hit the Cert Spotter speed bump. Wait a bit and try again.",
+	"Too many CT lookups this hour. Take a breather.",
+	"The free API has a 100/hour ceiling. You've reached it. Impressive, honestly.",
 }
 
 // --- Unnecessary root sass pool ---

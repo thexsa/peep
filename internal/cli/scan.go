@@ -23,11 +23,15 @@ var scanCmd = &cobra.Command{
   - OCSP staple check (did the server staple an OCSP response?)
   - OCSP revocation check (live query to the CA's OCSP responder)
   - CRL revocation check (fetch and parse the Certificate Revocation List)
-  - Certificate Transparency log verification
+  - Certificate Transparency log verification (via Cert Spotter API)
   - Cipher suite enumeration (which ciphers does the server support?)
   - TLS version probing (which versions are enabled?)
 
 Note: This scan takes longer due to multiple connection probes.
+
+CT Log Checks use the free Cert Spotter API by SSLMate, which is limited to
+100 queries per hour. The current query count is displayed during the scan.
+Certificates from private/internal CAs are automatically skipped.
 
 Examples:
   peep scan example.com
@@ -142,8 +146,10 @@ func runScan(cmd *cobra.Command, args []string) error {
 		}
 
 		// CT log check
-		fmt.Println(ui.Theme.MutedStyle.Render("  Checking Certificate Transparency logs..."))
-		ctResult := analyzer.CheckCTLogs(leaf.SerialNumber, leaf.CommonName, chain.TrustStoreVerified)
+		ctCount, ctLimit := analyzer.CTQueryCount()
+		fmt.Println(ui.Theme.MutedStyle.Render(
+			fmt.Sprintf("  Checking Certificate Transparency logs... (Cert Spotter: %d/%d queries this hour)", ctCount, ctLimit)))
+		ctResult := analyzer.CheckCTLogs(leaf.CommonName, leaf.Fingerprint, chain.TrustStoreVerified)
 		fmt.Println(ui.RenderCTLogResult(ctResult))
 	}
 
