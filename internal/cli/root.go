@@ -21,17 +21,19 @@ import (
 
 var (
 	// Flags
-	flagProto     string
-	flagTimeout   int
-	flagJSON      bool
-	flagPlainText bool
-	flagInsecure  bool
-	flagVerbose   bool   // -v/--verbose/--stare: PEM certs (was -vv)
-	flagDetails   bool   // -d/--details/--gaze: cert detail cards (was -v)
-	flagExplain   bool   // -e/--explain/--whytho
-	flagSave      string // -s/--save/--polaroid: "all" or index number
-	flagSaveSet   bool   // tracks whether --save was explicitly set
-	flagRaw       bool   // -r/--raw/--ogle: raw x509 text output
+	flagProto      string
+	flagTimeout    int
+	flagJSON       bool
+	flagPlainText  bool
+	flagInsecure   bool
+	flagVerbose    bool   // -v/--verbose/--stare: PEM certs (was -vv)
+	flagDetails    bool   // -d/--details/--gaze: cert detail cards (was -v)
+	flagExplain    bool   // -e/--explain/--whytho
+	flagSave       string // -s/--save/--polaroid: "all" or index number
+	flagSaveSet    bool   // tracks whether --save was explicitly set
+	flagRaw        bool   // -r/--raw/--ogle: raw x509 text output
+	flagInternalCA bool   // --internal-ca: adjust grading for internal/private CA certs
+	flagCABundle   string // --ca-bundle: path to custom CA bundle (replaces system trust store)
 )
 
 var rootCmd = &cobra.Command{
@@ -101,6 +103,14 @@ func init() {
 	// -r / --raw / --ogle
 	rootCmd.PersistentFlags().BoolVarP(&flagRaw, "raw", "r", false, "Show raw x509 text output for each cert in the chain")
 	rootCmd.PersistentFlags().BoolVar(&flagRaw, "ogle", false, "Show raw x509 output (alias for --raw)")
+
+	// --internal-ca
+	rootCmd.PersistentFlags().BoolVar(&flagInternalCA, "internal-ca", false,
+		"Adjust grading for internal/private CA certificates (skips SCT and 398-day validity checks)")
+
+	// --ca-bundle
+	rootCmd.PersistentFlags().StringVar(&flagCABundle, "ca-bundle", "",
+		"Path to a CA certificate bundle (.pem, .crt, .cer, .der) — replaces system trust store")
 }
 
 // Execute runs the root command.
@@ -247,7 +257,7 @@ func runPeep(cmd *cobra.Command, args []string) error {
 
 	// Analyze
 	handshake := analyzer.AnalyzeHandshake(result.ConnState)
-	chain := analyzer.AnalyzeChain(result.ConnState, host, flagInsecure)
+	chain := analyzer.AnalyzeChain(result.ConnState, host, flagInsecure, flagCABundle)
 
 	// Build report
 	report := &analyzer.DiagnosticReport{
@@ -258,15 +268,16 @@ func runPeep(cmd *cobra.Command, args []string) error {
 			Protocol:  result.Protocol,
 			ProbeType: result.ProbeType,
 		},
-		Handshake:     handshake,
-		Chain:         chain,
-		OverallStatus: analyzer.MainCharacterEnergy,
-		ScanDuration:  time.Since(startTime),
-		Timestamp:     time.Now(),
+		Handshake:      handshake,
+		Chain:          chain,
+		OverallStatus:  analyzer.MainCharacterEnergy,
+		ScanDuration:   time.Since(startTime),
+		Timestamp:      time.Now(),
+		InternalCAMode: flagInternalCA,
 	}
 
 	// Build warnings
-	report.Warnings = education.BuildWarnings(report)
+	report.Warnings = education.BuildWarnings(report, flagInternalCA)
 
 	// Calculate overall status
 	report.OverallStatus = worstOverall(report)

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/thexsa/peep/internal/analyzer"
 )
 
@@ -185,7 +186,7 @@ func RenderCRLResult(result analyzer.CRLResult) string {
 }
 
 // RenderCTLogResult renders the Certificate Transparency log check.
-func RenderCTLogResult(result analyzer.CTLogResult) string {
+func RenderCTLogResult(result analyzer.CTLogResult, internalCA bool) string {
 	header := Theme.BoldStyle.Render("CERTIFICATE TRANSPARENCY")
 
 	var lines []string
@@ -209,16 +210,99 @@ func RenderCTLogResult(result analyzer.CTLogResult) string {
 				fmt.Sprintf("  SCT #%d", i+1),
 				fmt.Sprintf("%s  %s", Theme.SuccessStyle.Render("✓ "+logName), Theme.MutedStyle.Render(ts))))
 		}
-	} else if result.IsPrivateCA {
-		lines = append(lines, renderKV("Status", Theme.MutedStyle.Render("Skipped — private/internal CA")))
+	} else if result.IsPrivateCA || internalCA {
+		lines = append(lines, renderKV("Status", Theme.MutedStyle.Render("No embedded SCTs (expected for internal CA)")))
 		lines = append(lines, renderKV("", Theme.MutedStyle.Render(PickSass(ctPrivateCASayings))))
 	} else {
 		lines = append(lines, renderKV("Status", Theme.WarningStyle.Render("No embedded SCTs")))
+		lines = append(lines, renderKV("Note", Theme.MutedStyle.Render("SCTs may be delivered via OCSP stapling or TLS extension instead")))
 		lines = append(lines, renderKV("", Theme.MutedStyle.Render(PickSass(ctNotFoundSayings))))
 	}
 
 	return ApplyBorder(lines, SectionBorder) + "\n"
 }
+
+// RenderCAOriginEvidence renders the CA origin confidence scoring results.
+// Only shown in standard mode (not when --internal-ca is passed).
+func RenderCAOriginEvidence(result analyzer.CAOriginResult) string {
+	header := Theme.BoldStyle.Render("CA ORIGIN ASSESSMENT")
+
+	var lines []string
+	lines = append(lines, header)
+	lines = append(lines, "")
+
+	// Assessment with color
+	purpleStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#C084FC"))
+	assessStyle := Theme.MutedStyle.Render
+	switch result.Assessment {
+	case "public_ca":
+		assessStyle = Theme.SuccessStyle.Render
+	case "very_likely_private_ca", "likely_private_ca":
+		assessStyle = purpleStyle.Render
+	case "possibly_private_ca":
+		assessStyle = purpleStyle.Render
+	}
+
+	label := formatAssessment(result.Assessment)
+	lines = append(lines, renderKV("Assessment", assessStyle(fmt.Sprintf("%s (score: %d)", label, result.Score))))
+
+	if len(result.Evidence) > 0 {
+		lines = append(lines, "")
+		lines = append(lines, renderKV("Evidence", ""))
+		for _, e := range result.Evidence {
+			sign := "+"
+			if e.Points < 0 {
+				sign = ""
+			}
+			pointStr := fmt.Sprintf("[%s%d]", sign, e.Points)
+			lines = append(lines, renderKV("", fmt.Sprintf("  %s  %s", Theme.BoldStyle.Render(fmt.Sprintf("%-6s", pointStr)), e.Detail)))
+		}
+	}
+
+	// Sassy comment based on assessment
+	switch result.Assessment {
+	case "very_likely_private_ca", "likely_private_ca":
+		lines = append(lines, "")
+		lines = append(lines, renderKV("", Theme.MutedStyle.Render(PickSass(caOriginPrivateSayings))))
+	case "possibly_private_ca":
+		lines = append(lines, "")
+		lines = append(lines, renderKV("", Theme.MutedStyle.Render(PickSass(caOriginMaybeSayings))))
+	}
+
+	return ApplyBorder(lines, SectionBorder) + "\n"
+}
+
+func formatAssessment(assessment string) string {
+	switch assessment {
+	case "public_ca":
+		return "Public CA"
+	case "very_likely_private_ca":
+		return "Very likely private/internal CA"
+	case "likely_private_ca":
+		return "Likely private/internal CA"
+	case "possibly_private_ca":
+		return "Possibly private/internal CA"
+	default:
+		return "Unknown"
+	}
+}
+
+var caOriginPrivateSayings = []string{
+	"This cert has 'internal infrastructure' written all over it. Use --internal-ca for appropriate grading.",
+	"The evidence strongly suggests a private CA. If that's expected, --internal-ca is your friend.",
+	"Everything about this cert screams 'enterprise PKI.' Consider --internal-ca for a fairer grade.",
+	"This looks like an internal CA cert doing internal CA things. Use --internal-ca to adjust the rubric.",
+	"Private CA detected. Nothing wrong with that — just use --internal-ca so peep grades it fairly.",
+	"The fingerprints are all over this one — internal CA. Use --internal-ca to silence the public-CA-only checks.",
+}
+
+var caOriginMaybeSayings = []string{
+	"Could be a private CA, could be a misconfigured public one. --internal-ca if you know for sure.",
+	"The evidence is mixed. If you know this is an internal CA, tell peep with --internal-ca.",
+	"Hard to say definitively. If this is an enterprise cert, --internal-ca will adjust the grading.",
+	"Inconclusive origin. Use --internal-ca if you know the CA, or investigate the chain.",
+}
+
 
 // --- Cipher sass pools ---
 

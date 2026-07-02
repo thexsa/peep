@@ -4,11 +4,15 @@ import (
 	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/pem"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 )
 
 // AnalyzeChain performs a full analysis of the certificate chain.
-func AnalyzeChain(state *tls.ConnectionState, targetHost string, skipVerify bool) ChainAnalysis {
+func AnalyzeChain(state *tls.ConnectionState, targetHost string, skipVerify bool, caBundlePath string) ChainAnalysis {
 	certs := state.PeerCertificates
 	totalCerts := len(certs)
 	analysis := ChainAnalysis{ChainLength: totalCerts}
@@ -34,7 +38,12 @@ func AnalyzeChain(state *tls.ConnectionState, targetHost string, skipVerify bool
 	if !skipVerify && totalCerts > 0 {
 		analysis.TrustStoreVerified, analysis.VerificationError,
 			analysis.TrustedRootName, analysis.TrustedRootSerial,
-			analysis.TrustedRootFingerprint = verifyTrustStore(certs, targetHost)
+			analysis.TrustedRootFingerprint = verifyTrustStore(certs, targetHost, caBundlePath)
+
+		if caBundlePath != "" {
+			analysis.CustomTrustStore = true
+			analysis.CustomTrustStorePath = caBundlePath
+		}
 	}
 
 	analysis.OverallGrade = gradeChain(analysis)
@@ -122,7 +131,7 @@ func checkUnnecessaryRoot(certs []*x509.Certificate) bool {
 
 // verifyTrustStore checks the chain against the system trust store.
 // Returns: verified, error, rootName, rootSerial, rootFingerprint.
-func verifyTrustStore(certs []*x509.Certificate, hostname string) (bool, string, string, string, string) {
+func verifyTrustStore(certs []*x509.Certificate, hostname string, caBundlePath string) (bool, string, string, string, string) {
 	if len(certs) == 0 {
 		return false, "no certificates presented", "", "", ""
 	}
@@ -150,12 +159,25 @@ func verifyTrustStore(certs []*x509.Certificate, hostname string) (bool, string,
 		}
 	}
 
-	// Then verify against the system trust store. Explicitly load the root
-	// pool so Go uses its own chain builder instead of the macOS platform
-	// verifier (which can fetch intermediates via AIA and use cached certs).
-	roots, err := x509.SystemCertPool()
-	if err != nil {
-		roots = x509.NewCertPool()
+	// Build root cert pool — either from a custom CA bundle or from the system.
+	var roots *x509.CertPool
+	if caBundlePath != "" {
+		// Custom CA bundle replaces the system trust store (like curl --cacert).
+		// Accepts .pem, .crt, .cer (PEM-encoded), and .der (DER-encoded) files.
+		var err error
+		roots, err = loadCABundle(caBundlePath)
+		if err != nil {
+			return false, fmt.Sprintf("failed to load CA bundle %q: %v", caBundlePath, err), "", "", ""
+		}
+	} else {
+		// Use the system trust store. Explicitly load the root pool so Go uses
+		// its own chain builder instead of the macOS platform verifier (which
+		// can fetch intermediates via AIA and use cached certs).
+		var err error
+		roots, err = x509.SystemCertPool()
+		if err != nil {
+			roots = x509.NewCertPool()
+		}
 	}
 
 	intermediates := x509.NewCertPool()
@@ -210,4 +232,54 @@ func gradeChain(a ChainAnalysis) HealthStatus {
 		grade = worst(grade, WrittenInCrayon)
 	}
 	return grade
+}
+
+// loadCABundle loads a CA certificate bundle from a file.
+// Supports PEM-encoded files (.pem, .crt, .cer) and DER-encoded files (.der, .cer).
+// The file may contain multiple certificates (PEM bundles).
+func loadCABundle(path string) (*x509.CertPool, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("cannot read file: %w", err)
+	}
+
+	pool := x509.NewCertPool()
+	count := 0
+
+	ext := strings.ToLower(filepath.Ext(path))
+
+	// Try PEM first — works for .pem, .crt, .cer (most common)
+	rest := data
+	for {
+		var block *pem.Block
+		block, rest = pem.Decode(rest)
+		if block == nil {
+			break
+		}
+		if block.Type != "CERTIFICATE" {
+			continue
+		}
+		cert, err := x509.ParseCertificate(block.Bytes)
+		if err != nil {
+			continue
+		}
+		pool.AddCert(cert)
+		count++
+	}
+
+	// If no PEM certs found and the extension suggests DER, try DER parsing
+	if count == 0 && (ext == ".der" || ext == ".cer" || ext == ".crt") {
+		cert, err := x509.ParseCertificate(data)
+		if err != nil {
+			return nil, fmt.Errorf("file contains no valid PEM or DER certificates")
+		}
+		pool.AddCert(cert)
+		count++
+	}
+
+	if count == 0 {
+		return nil, fmt.Errorf("no valid certificates found in %s", filepath.Base(path))
+	}
+
+	return pool, nil
 }

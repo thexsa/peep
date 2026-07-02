@@ -39,6 +39,7 @@ func AnalyzeCert(cert *x509.Certificate, depth int, totalCerts int, targetHost s
 
 	// Expiry analysis
 	analysis.DaysRemaining = int(time.Until(cert.NotAfter).Hours() / 24)
+	analysis.ValidityDays = int(cert.NotAfter.Sub(cert.NotBefore).Hours() / 24)
 	analysis.IsExpired = time.Now().After(cert.NotAfter)
 	analysis.ExpiryGrade = gradeExpiry(analysis.DaysRemaining, analysis.IsExpired)
 

@@ -301,6 +301,8 @@ Every flag has a standard name and a fun themed alias. Use whichever speaks to y
 | `-s` | `--save` | `--polaroid` | Save cert PEM(s) to files. No value = all, or specify index |
 | `-t` | `--timeout` | `--blink` | Connection timeout in seconds (default: 5) |
 | `-v` | `--verbose` | `--stare` | Show base64 PEM encoded certs |
+| | `--internal-ca` | | Adjust grading for internal/private CA certs (skips SCT and 398-day checks) |
+| | `--ca-bundle` | | Path to CA certificate bundle (.pem, .crt, .cer, .der) — replaces system trust store |
 
 #### Subcommands
 
@@ -324,6 +326,41 @@ peep --whytho example.com              # CLI with issue explanations (themed ali
 peep --shades --whytho example.com     # Copy/paste friendly with explanations
 peep --polaroid example.com            # Save all cert PEMs (themed alias)
 peep --ogle example.com                # Raw x509 output (themed alias)
+```
+
+---
+
+## Internal/Private CA Support
+
+When scanning certificates signed by internal or private CAs (like Microsoft AD CS), peep automatically detects private CA characteristics using a confidence scoring system. In standard mode, it shows a **CA Origin Assessment** block with evidence when a non-public CA is suspected.
+
+### `--internal-ca`
+
+Explicitly tell peep the certificate is from an internal CA. This adjusts grading:
+- **SCT warnings** are suppressed (internal CAs don't participate in Certificate Transparency)
+- **398-day validity warnings** are skipped (internal CAs commonly issue longer-lived certs)
+- The CA origin assessment block is hidden
+
+```bash
+# Scan an internal server — skip public-CA-only checks
+peep scan intranet.corp.local --internal-ca
+
+# Combine with --insecure if the root CA isn't in your system store
+peep scan intranet.corp.local --internal-ca --insecure
+```
+
+### `--ca-bundle`
+
+Replace the system trust store with a custom CA certificate bundle. Works like `curl --cacert` — the specified file becomes the **only** trusted root(s).
+
+Supports `.pem`, `.crt`, `.cer` (PEM-encoded) and `.der` (DER-encoded) files.
+
+```bash
+# Verify against your organization's root CA
+peep scan mail.corp.local --ca-bundle /path/to/corp-root-ca.pem
+
+# Combine with --internal-ca for proper grading
+peep scan mail.corp.local --ca-bundle /path/to/corp-root-ca.crt --internal-ca
 ```
 
 ---

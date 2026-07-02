@@ -9,7 +9,9 @@ import (
 )
 
 // BuildWarnings examines a diagnostic report and generates contextual warnings.
-func BuildWarnings(report *analyzer.DiagnosticReport) []analyzer.Warning {
+// When internalCA is true, checks that only apply to publicly-trusted certificates
+// (like the 398-day validity cap) are skipped.
+func BuildWarnings(report *analyzer.DiagnosticReport, internalCA bool) []analyzer.Warning {
 	var warnings []analyzer.Warning
 
 	warnings = append(warnings, checkTLSVersion(report.Handshake)...)
@@ -17,6 +19,7 @@ func BuildWarnings(report *analyzer.DiagnosticReport) []analyzer.Warning {
 
 	for _, cert := range report.Chain.Certificates {
 		warnings = append(warnings, checkCert(cert)...)
+		warnings = append(warnings, CheckValidityPeriodWarning(cert, internalCA)...)
 	}
 
 	warnings = append(warnings, checkChain(report.Chain)...)
@@ -665,11 +668,13 @@ var ocspStapleMissingSayings = []string{
 // --- CT/SCT Warning Check ---
 
 // CheckCTWarnings generates warnings based on Certificate Transparency results.
-func CheckCTWarnings(ct analyzer.CTLogResult) []analyzer.Warning {
+// When internalCA is true, the missing SCTs warning is suppressed (it's expected
+// for private/internal CAs not to embed SCTs).
+func CheckCTWarnings(ct analyzer.CTLogResult, internalCA bool) []analyzer.Warning {
 	var w []analyzer.Warning
 
-	if ct.IsPrivateCA {
-		// Private CA — no warning needed, CT doesn't apply
+	if ct.IsPrivateCA || internalCA {
+		// Private CA or --internal-ca mode — no warning, CT doesn't apply
 		return w
 	}
 
@@ -688,16 +693,54 @@ func CheckCTWarnings(ct analyzer.CTLogResult) []analyzer.Warning {
 		w = append(w, analyzer.Warning{
 			Code:     "CT_NO_SCTS",
 			Severity: analyzer.MallCopCredentials,
-			Title:    "No Embedded SCTs — Certificate Not Logged in CT",
-			Detail:   "This certificate has no Signed Certificate Timestamps (SCTs). It was not submitted to Certificate Transparency logs.",
+			Title:    "No Embedded SCTs Found",
+			Detail:   "This certificate has no Signed Certificate Timestamps (SCTs). Missing SCTs may indicate a private/internal CA, a pre-CT certificate, or a non-compliant issuer.",
 			Why:      pick(ctNoSCTSayings),
-			Explain:  "Certificate Transparency (CT) is a public, append-only log of all certificates issued by publicly-trusted CAs. Chrome, Safari, and Apple platforms require SCTs for certificates to be trusted. Without SCTs, browsers may reject the certificate or show warnings. SCTs are embedded by the CA at issuance time — they prove the cert was logged before it was issued, making rogue or misissued certificates detectable. Missing SCTs usually means: (1) the cert was issued by a private/internal CA (expected — CT doesn't apply), (2) the cert was issued before CT was required, or (3) the CA failed to log it.",
-			Fix:      "If this is a publicly-trusted certificate, contact your CA — they should be embedding SCTs at issuance. If this is an internal/private CA, this warning is expected (use --insecure to skip trust store checks). Re-issuing the cert from a compliant CA will include SCTs automatically.",
+			Explain:  "Signed Certificate Timestamps (SCTs) prove a certificate was submitted to Certificate Transparency (CT) logs before issuance. Chrome, Safari, and Apple platforms require SCTs for publicly-trusted certificates. Missing embedded SCTs can mean: (1) the cert uses OCSP stapling or the TLS SCT extension instead; (2) it's issued by a private/internal CA (where CT doesn't apply — use --internal-ca); (3) it predates CT requirements; or (4) the CA is not CT-compliant. Note: peep checks for embedded SCTs only — it does not query CT logs directly.",
+			Fix:      "If this is a publicly-trusted certificate, contact your CA — they should be embedding SCTs at issuance. If this is an internal/private CA, use --internal-ca to suppress this warning. Re-issuing the cert from a compliant public CA will include SCTs automatically.",
 			DocRef:   "peep docs certs",
 		})
 	}
 
 	return w
+}
+
+// CheckValidityPeriodWarning checks if a leaf certificate's validity period
+// exceeds the CA/B Forum 398-day maximum for publicly-trusted certificates.
+// Skipped when internalCA is true (internal CAs commonly issue longer-lived certs).
+func CheckValidityPeriodWarning(cert analyzer.CertAnalysis, internalCA bool) []analyzer.Warning {
+	var w []analyzer.Warning
+
+	// Only check leaf certs, and only in standard (non-internal) mode
+	if internalCA || cert.Role != analyzer.RoleLeaf {
+		return w
+	}
+
+	if cert.ValidityDays > 398 {
+		w = append(w, analyzer.Warning{
+			Code:     "CERT_LONG_VALIDITY",
+			Severity: analyzer.MallCopCredentials,
+			Title:    fmt.Sprintf("Certificate Validity Exceeds 398 Days (%d days)", cert.ValidityDays),
+			Detail:   fmt.Sprintf("This certificate has a validity period of %d days, exceeding the CA/B Forum maximum of 398 days for publicly-trusted certificates.", cert.ValidityDays),
+			Why:      pick(longValiditySayings),
+			Explain:  "The CA/Browser Forum Baseline Requirements cap publicly-trusted TLS certificate lifetimes at 398 days (since September 2020). Shorter lifetimes reduce the window of exposure if a private key is compromised and ensure certificates reflect current organizational ownership. Apple, Google, and Mozilla enforce this in their root programs — a publicly-trusted CA should not issue certificates exceeding this limit. If this is an internal/private CA, this limit does not apply (use --internal-ca).",
+			Fix:      "Request a certificate with a validity period of 398 days or less from your CA. If this is an internal/private CA certificate, use --internal-ca to skip this check.",
+			DocRef:   "peep docs certs",
+		})
+	}
+
+	return w
+}
+
+var longValiditySayings = []string{
+	"This cert has a validity period longer than most marriages. Shorten it.",
+	"398 days is the max. This cert said 'rules are for other people.'",
+	"The CA/B Forum said 398 days max. This cert apparently doesn't read memos.",
+	"A cert this long-lived is a liability, not a convenience. Rotate it.",
+	"This cert's validity period is so long, it'll outlive the company's next rebranding.",
+	"If the key gets compromised, this cert will be the gift that keeps on giving. For attackers.",
+	"Shorter cert lifetimes exist for a reason. This cert chose to ignore all of them.",
+	"This cert is playing the long game. Unfortunately, so are the attackers.",
 }
 
 var ctNoSCTSayings = []string{

@@ -163,6 +163,7 @@ type CertAnalysis struct {
 	IsWildcard       bool         `json:"is_wildcard"`
 	IsCA             bool         `json:"is_ca"`
 	HostnameMatch    bool         `json:"hostname_match"`
+	ValidityDays     int          `json:"validity_days"`
 	OverallGrade     HealthStatus `json:"overall_grade"`
 	RawCert          *x509.Certificate `json:"-"`
 }
@@ -182,16 +183,20 @@ type ChainAnalysis struct {
 	TrustedRootName             string         `json:"trusted_root_name,omitempty"`
 	TrustedRootSerial           string         `json:"trusted_root_serial,omitempty"`
 	TrustedRootFingerprint      string         `json:"trusted_root_fingerprint,omitempty"`
+	CustomTrustStore            bool           `json:"custom_trust_store,omitempty"`
+	CustomTrustStorePath        string         `json:"custom_trust_store_path,omitempty"`
 	OverallGrade                HealthStatus   `json:"overall_grade"`
 }
 
 // DiagnosticReport is the complete output of a peep scan.
 type DiagnosticReport struct {
-	Target       TargetInfo        `json:"target"`
-	Handshake    HandshakeAnalysis `json:"handshake"`
-	Chain        ChainAnalysis     `json:"chain"`
-	Warnings     []Warning         `json:"warnings"`
-	OverallStatus HealthStatus     `json:"overall_status"`
-	ScanDuration time.Duration     `json:"scan_duration_ms"`
-	Timestamp    time.Time         `json:"timestamp"`
+	Target        TargetInfo        `json:"target"`
+	Handshake     HandshakeAnalysis `json:"handshake"`
+	Chain         ChainAnalysis     `json:"chain"`
+	CAOrigin      *CAOriginResult   `json:"ca_origin,omitempty"`
+	Warnings      []Warning         `json:"warnings"`
+	OverallStatus HealthStatus      `json:"overall_status"`
+	ScanDuration  time.Duration     `json:"scan_duration_ms"`
+	Timestamp     time.Time         `json:"timestamp"`
+	InternalCAMode bool            `json:"internal_ca_mode,omitempty"`
 }

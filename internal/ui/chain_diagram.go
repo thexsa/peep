@@ -71,6 +71,9 @@ func RenderChainDiagram(chain analyzer.ChainAnalysis, verbosity int) string {
 	if chain.TrustStoreVerified {
 		lines = append(lines, "")
 		trustLine := "[PASS] Chain verified against system trust store"
+		if chain.CustomTrustStore {
+			trustLine = fmt.Sprintf("[PASS] Chain verified against custom CA bundle (%s)", chain.CustomTrustStorePath)
+		}
 		if chain.TrustedRootName != "" {
 			trustLine += fmt.Sprintf(" (Trusted Root: %s)", chain.TrustedRootName)
 		}

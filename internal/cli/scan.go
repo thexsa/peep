@@ -92,7 +92,7 @@ func runScan(cmd *cobra.Command, args []string) error {
 	fmt.Println(ui.RenderBanner(result.Host, result.Port, result.IP, result.Protocol))
 
 	handshake := analyzer.AnalyzeHandshake(result.ConnState)
-	chain := analyzer.AnalyzeChain(result.ConnState, host, flagInsecure)
+	chain := analyzer.AnalyzeChain(result.ConnState, host, flagInsecure, flagCABundle)
 
 	// Build a diagnostic report for warning generation
 	report := &analyzer.DiagnosticReport{
@@ -108,7 +108,7 @@ func runScan(cmd *cobra.Command, args []string) error {
 
 	// Collect all warnings from the education package
 	var allWarnings []analyzer.Warning
-	allWarnings = append(allWarnings, education.BuildWarnings(report)...)
+	allWarnings = append(allWarnings, education.BuildWarnings(report, flagInternalCA)...)
 
 	// Handshake
 	fmt.Println(ui.RenderHandshakeCard(handshake))
@@ -185,14 +185,22 @@ func runScan(cmd *cobra.Command, args []string) error {
 		// CT log check (SCT parsing — no network call)
 		fmt.Println(ui.Theme.MutedStyle.Render("  Checking Certificate Transparency (embedded SCTs)..."))
 		ctResult := analyzer.CheckCTLogs(leaf.RawCert, chain.TrustStoreVerified)
-		fmt.Println(ui.RenderCTLogResult(ctResult))
+		fmt.Println(ui.RenderCTLogResult(ctResult, flagInternalCA))
 
 		// Collect CT warnings
-		ctWarnings := education.CheckCTWarnings(ctResult)
+		ctWarnings := education.CheckCTWarnings(ctResult, flagInternalCA)
 		allWarnings = append(allWarnings, ctWarnings...)
 		for _, w := range ctWarnings {
 			if w.Severity > chain.OverallGrade {
 				chain.OverallGrade = w.Severity
+			}
+		}
+
+		// CA origin assessment (standard mode only — skip when --internal-ca is set)
+		if !flagInternalCA {
+			caOrigin := analyzer.DetectCAOrigin(chain, leaf.RawCert, ctResult.Found)
+			if caOrigin.Assessment != "public_ca" {
+				fmt.Println(ui.RenderCAOriginEvidence(caOrigin))
 			}
 		}
 	}
