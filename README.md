@@ -59,9 +59,9 @@ Just give peep a host and port. It figures out the rest.
 | 993/995 | IMAPS/POP3S | Direct TLS |
 | 21 | FTP | AUTH TLS upgrade |
 
-Override with `-p`/`--proto` when services run on non-standard ports:
+Override with `-P`/`--proto` when services run on non-standard ports:
 ```bash
-peep -p smtp mailserver:2525
+peep -P smtp mailserver:2525
 ```
 
 ### 🔗 Chain of Trust Visualization
@@ -109,6 +109,20 @@ Pipe to `jq`, feed into monitoring, or parse in CI/CD:
 peep --json example.com | jq '.overall_status'
 peep --json --explain example.com | jq '.warnings[].fix'
 ```
+
+### 🔒 CRL & Revocation Intelligence
+The deep scan checks CRL revocation by fetching the Certificate Revocation List and verifying the certificate serial is not present.
+
+**LDAP distribution points** (common with Microsoft AD CS) are automatically detected and skipped — peep will try HTTP endpoints instead and provide the `ldapsearch` command for manual verification from a domain-joined machine.
+
+**TLS endpoint warnings**: If the CRL endpoint has a certificate error (e.g., hostname mismatch), peep still fetches and verifies the CRL data (it's signed by the CA, so transport-layer TLS isn't required for integrity), but warns you. This matters for environments with **hard-fail CRL policies**, where clients abort the TLS handshake if revocation status cannot be verified:
+
+- **Java applications** (`-Dcom.sun.security.enableCRLDP=true` + hard-fail revocation checking)
+- **mTLS/Zero Trust systems** (Istio, SPIFFE, mutual TLS gateways)
+- **Custom TLS clients** (Go `crypto/tls` with `VerifyPeerCertificate`, Python `ssl` with CRL checking)
+- **Financial/healthcare systems** (PCI-DSS, HIPAA environments with mandatory revocation checking)
+- **Government/military PKI** (DoD PKI, Common Access Card infrastructure)
+- **Hardware Security Modules (HSMs)** and embedded systems with strict CRL enforcement
 
 ### 🌶️ Sarcastic Commentary
 Every finding comes with rotating sarcastic remarks. Because debugging TLS should at least be entertaining.
@@ -251,8 +265,11 @@ peep -P smtp mailrelay.internal:2525
 # Plain text output (no color, no emoji — easy to copy/paste)
 peep -p example.com
 
-# Deep scan (cipher enumeration, OCSP staple + live, CRL, CT logs)
+# Deep scan (cipher enumeration, OCSP staple + live, CRL, CT logs, SSL/TLS version probing)
 peep scan example.com
+
+# Deep scan with explanations and remediation advice
+peep scan --explain example.com
 
 # Skip trust store verification (for self-signed certs)
 peep -i internal-server.local:443
@@ -275,7 +292,7 @@ Every flag has a standard name and a fun themed alias. Use whichever speaks to y
 |-------|------|-------------|-------------|
 | `-d` | `--details` | `--gaze` | Show detailed cert info cards |
 | `-e` | `--explain` | `--whytho` | Explain each issue with fix recommendations and doc references |
-| `-h` | `--help` | `--eye-chart` | Show help |
+| `-h` | `--help` | | Show help |
 | `-i` | `--insecure` | `--blindfold` | Skip system trust store verification |
 | `-j` | `--json` | `--monocle` | JSON output for scripting (respects -d, -v, -e) |
 | `-p` | `--plain-text` | `--shades` | No color, no emoji, no Unicode — easy to copy/paste |
@@ -291,8 +308,9 @@ Every flag has a standard name and a fun themed alias. Use whichever speaks to y
 |---------|-------------|
 | `peep scan <host>` | Deep scan with cipher enumeration, OCSP, CRL, CT logs |
 | `peep docs [topic]` | Built-in TLS reference |
-| `peep update` | Update peep to the latest version |
-| `peep update --check` | Check for updates without installing |
+| `peep update` | Update peep to the latest version (alias: `peep upgrade`) |
+| `peep update --check` | Check for updates without installing (alias: `--sniff`) |
+| `peep update --force` | Force update even if already on latest version |
 | `peep version` | Show version, install method, and platform |
 
 Port is always specified in the host argument: `host:port` (default: 443)

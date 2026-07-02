@@ -43,7 +43,6 @@ func EnumerateCiphers(host, port string, timeout time.Duration) CipherEnumResult
 		id   uint16
 		name string
 	}{
-		{0x0200, "SSLv2"},   // Cannot probe from Go — will always show unsupported
 		{tls.VersionSSL30, "SSLv3"},
 		{tls.VersionTLS10, "TLSv1.0"},
 		{tls.VersionTLS11, "TLSv1.1"},

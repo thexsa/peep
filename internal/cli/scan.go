@@ -25,18 +25,25 @@ var scanCmd = &cobra.Command{
   - CRL revocation check (fetch and parse the Certificate Revocation List)
   - Certificate Transparency verification (parse embedded SCTs)
   - Cipher suite enumeration (which ciphers does the server support?)
-  - TLS version probing (which versions are enabled?)
+  - SSL/TLS version probing (SSLv3, TLS 1.0–1.3)
 
-Note: This scan takes longer due to multiple connection probes.
+CRL checks iterate all distribution points. LDAP endpoints (common with
+Microsoft AD CS) are detected and skipped — HTTP endpoints are tried instead.
+If an HTTPS CRL endpoint has a TLS error, peep retries with TLS verification
+disabled and warns you (the CRL data is signature-verified against the CA).
 
 CT checks parse Signed Certificate Timestamps (SCTs) embedded directly in
 the certificate — no external API calls needed. SCTs are cryptographic proof
 that the certificate was submitted to CT logs before issuance.
 Certificates from private/internal CAs are automatically skipped.
 
+Use --explain (--whytho) to add detailed explanations, recommended fixes,
+and documentation references for every finding. Works on all peep commands.
+
 Examples:
   peep scan example.com
-  peep scan --explain example.com`,
+  peep scan --explain example.com
+  peep scan --whytho internal-server.local`,
 	Args: cobra.ExactArgs(1),
 	RunE: runScan,
 }
@@ -69,6 +76,8 @@ func runScan(cmd *cobra.Command, args []string) error {
 	fmt.Println(ui.Theme.MutedStyle.Render("  Starting deep scan..."))
 	fmt.Println()
 
+	startTime := time.Now()
+
 	result, err := probe.Probe(probe.ProbeOptions{
 		Host:    host,
 		Port:    port,
@@ -84,6 +93,22 @@ func runScan(cmd *cobra.Command, args []string) error {
 
 	handshake := analyzer.AnalyzeHandshake(result.ConnState)
 	chain := analyzer.AnalyzeChain(result.ConnState, host, flagInsecure)
+
+	// Build a diagnostic report for warning generation
+	report := &analyzer.DiagnosticReport{
+		Target: analyzer.TargetInfo{
+			Host:     result.Host,
+			Port:     result.Port,
+			IP:       result.IP,
+			Protocol: result.Protocol,
+		},
+		Handshake: handshake,
+		Chain:     chain,
+	}
+
+	// Collect all warnings from the education package
+	var allWarnings []analyzer.Warning
+	allWarnings = append(allWarnings, education.BuildWarnings(report)...)
 
 	// Handshake
 	fmt.Println(ui.RenderHandshakeCard(handshake))
@@ -103,6 +128,7 @@ func runScan(cmd *cobra.Command, args []string) error {
 
 			// Collect OCSP staple warnings
 			stapleWarnings := education.CheckOCSPStapleWarnings(stapleResult)
+			allWarnings = append(allWarnings, stapleWarnings...)
 			for _, w := range stapleWarnings {
 				if w.Severity > chain.OverallGrade {
 					chain.OverallGrade = w.Severity
@@ -139,6 +165,7 @@ func runScan(cmd *cobra.Command, args []string) error {
 
 			// Collect CRL warnings
 			crlWarnings := education.CheckCRLWarnings(crlResult)
+			allWarnings = append(allWarnings, crlWarnings...)
 			for _, w := range crlWarnings {
 				if w.Severity > chain.OverallGrade {
 					chain.OverallGrade = w.Severity
@@ -167,11 +194,30 @@ func runScan(cmd *cobra.Command, args []string) error {
 		renderRawX509(chain)
 	}
 
+	// FINDINGS section — render collected warnings
+	if len(allWarnings) > 0 && (flagDetails || flagExplain) {
+		fmt.Println(ui.RenderWarnings(allWarnings, flagExplain))
+	}
+
 	// Overall
 	overallStatus := chain.OverallGrade
 	if handshake.OverallGrade > overallStatus {
 		overallStatus = handshake.OverallGrade
 	}
+	for _, w := range allWarnings {
+		if w.Severity > overallStatus {
+			overallStatus = w.Severity
+		}
+	}
+
+	// Scan duration
+	duration := fmt.Sprintf("  Scan completed in %s", time.Since(startTime).Round(time.Millisecond))
+	if flagExplain {
+		duration += ui.Theme.MutedStyle.Render(fmt.Sprintf(" — %s", ui.RandomScanComment()))
+	}
+	fmt.Println(ui.Theme.MutedStyle.Render(duration))
+	fmt.Println()
+
 	fmt.Println(ui.RenderOverallStatus(overallStatus))
 
 	// Save certs if requested

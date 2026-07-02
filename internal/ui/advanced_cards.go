@@ -169,6 +169,12 @@ func RenderCRLResult(result analyzer.CRLResult) string {
 		lines = append(lines, renderKV("Next Update", value))
 	}
 
+	// TLS warning for HTTPS CRL endpoints with cert issues
+	if result.TLSWarning != "" {
+		lines = append(lines, "")
+		lines = append(lines, renderKV("", Theme.WarningStyle.Render("[WARN] "+result.TLSWarning)))
+	}
+
 	// Note skipped LDAP endpoints if we used an HTTP fallback
 	if len(result.SkippedLDAP) > 0 {
 		lines = append(lines, "")

@@ -1,6 +1,7 @@
 package analyzer
 
 import (
+	"crypto/tls"
 	"crypto/x509"
 	"fmt"
 	"io"
@@ -25,6 +26,7 @@ type CRLResult struct {
 	CRLEndpoint     string    `json:"crl_endpoint,omitempty"`
 	CRLSize         int       `json:"crl_size"`
 	EntryCount      int       `json:"entry_count"`
+	TLSWarning      string    `json:"tls_warning,omitempty"`       // Warning when HTTPS CRL endpoint has TLS issues
 	IsLDAP          bool      `json:"is_ldap,omitempty"`           // True if the CRL endpoint is LDAP
 	LDAPEndpoint    string    `json:"ldap_endpoint,omitempty"`     // The LDAP URI for display
 	AllEndpoints    []string  `json:"all_endpoints,omitempty"`     // All CRL distribution point URIs
@@ -96,6 +98,24 @@ func fetchAndCheckCRL(cert *x509.Certificate, issuer *x509.Certificate, endpoint
 
 	client := &http.Client{Timeout: timeout}
 	resp, err := client.Get(endpoint)
+	if err != nil && isHTTPS(endpoint) {
+		// HTTPS endpoint failed — retry with InsecureSkipVerify to still fetch the CRL
+		// This is important: the CRL data itself is signed by the CA, so TLS verification
+		// of the distribution point is not required for integrity.
+		insecureTransport := &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		}
+		insecureClient := &http.Client{
+			Timeout:   timeout,
+			Transport: insecureTransport,
+		}
+		resp, err = insecureClient.Get(endpoint)
+		if err == nil {
+			result.TLSWarning = fmt.Sprintf("CRL endpoint has a TLS error (e.g., certificate mismatch). "+
+				"CRL data was fetched by skipping TLS verification — the CRL signature was still verified against the issuing CA. "+
+				"Clients with hard-fail CRL policies may be unable to reach this endpoint.")
+		}
+	}
 	if err != nil {
 		errMsg := err.Error()
 		if isHTTPS(endpoint) {

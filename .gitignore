@@ -24,3 +24,10 @@ debug
 *.test
 *.out
 *.prof
+
+# Certificates (from --save/--polaroid)
+*.pem
+
+# Environment
+.env
+.env.*
