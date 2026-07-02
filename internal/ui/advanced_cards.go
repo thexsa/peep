@@ -112,6 +112,20 @@ func RenderCRLResult(result analyzer.CRLResult) string {
 		return ApplyBorder(lines, SectionBorder) + "\n"
 	}
 
+	// Show LDAP-only case
+	if result.IsLDAP {
+		lines = append(lines, renderKV("CRL Endpoint", Theme.MutedStyle.Render(truncateURI(result.LDAPEndpoint, 80))))
+		lines = append(lines, renderKV("Protocol", Theme.WarningStyle.Render("LDAP (cannot fetch via HTTP)")))
+		lines = append(lines, renderKV("", Theme.MutedStyle.Render(
+			"This is a Microsoft AD CS CRL distributed via LDAP/Active Directory.")))
+		lines = append(lines, renderKV("", Theme.MutedStyle.Render(
+			"To check manually from a domain-joined machine:")))
+		lines = append(lines, renderKV("", Theme.MutedStyle.Render(
+			"  "+analyzer.LDAPSearchCommand(result.LDAPEndpoint))))
+		lines = append(lines, renderKV("", Theme.MutedStyle.Render(PickSass(crlFetchFailSayings))))
+		return ApplyBorder(lines, SectionBorder) + "\n"
+	}
+
 	lines = append(lines, renderKV("CRL Endpoint", Theme.MutedStyle.Render(result.CRLEndpoint)))
 
 	if !result.Fetched {
@@ -120,6 +134,13 @@ func RenderCRLResult(result analyzer.CRLResult) string {
 			lines = append(lines, renderKV("Detail", Theme.MutedStyle.Render(result.FetchError)))
 		}
 		lines = append(lines, renderKV("", Theme.MutedStyle.Render(PickSass(crlFetchFailSayings))))
+		// Note skipped LDAP endpoints
+		if len(result.SkippedLDAP) > 0 {
+			lines = append(lines, "")
+			lines = append(lines, renderKV("LDAP CRL", Theme.MutedStyle.Render("Also available via LDAP (not fetchable):")))
+			lines = append(lines, renderKV("", Theme.MutedStyle.Render(
+				"  "+analyzer.LDAPSearchCommand(result.SkippedLDAP[0]))))
+		}
 		return ApplyBorder(lines, SectionBorder) + "\n"
 	}
 
@@ -146,6 +167,12 @@ func RenderCRLResult(result analyzer.CRLResult) string {
 			value += Theme.ErrorStyle.Render(" (STALE — past due!)")
 		}
 		lines = append(lines, renderKV("Next Update", value))
+	}
+
+	// Note skipped LDAP endpoints if we used an HTTP fallback
+	if len(result.SkippedLDAP) > 0 {
+		lines = append(lines, "")
+		lines = append(lines, renderKV("Note", Theme.MutedStyle.Render("LDAP CRL also available (skipped — used HTTP endpoint instead)")))
 	}
 
 	return ApplyBorder(lines, SectionBorder) + "\n"
@@ -480,4 +507,13 @@ func RenderCipherEnum(result analyzer.CipherEnumResult) string {
 	}
 
 	return ApplyBorder(lines, SectionBorder) + "\n"
+}
+
+// truncateURI shortens a URI for display, keeping the beginning and end.
+func truncateURI(uri string, maxLen int) string {
+	if len(uri) <= maxLen {
+		return uri
+	}
+	half := (maxLen - 3) / 2
+	return uri[:half] + "..." + uri[len(uri)-half:]
 }

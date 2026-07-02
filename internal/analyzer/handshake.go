@@ -30,6 +30,10 @@ func getTLSVersionName(v uint16) string {
 		return "TLSv1.1"
 	case tls.VersionTLS10:
 		return "TLSv1.0"
+	case tls.VersionSSL30:
+		return "SSLv3"
+	case 0x0200:
+		return "SSLv2"
 	default:
 		return "Unknown"
 	}
@@ -44,6 +48,10 @@ func gradeTLSVersion(v uint16) HealthStatus {
 	case tls.VersionTLS11:
 		return WrittenInCrayon
 	case tls.VersionTLS10:
+		return WrittenInCrayon
+	case tls.VersionSSL30: // SSLv3 — POODLE vulnerable
+		return WrittenInCrayon
+	case 0x0200: // SSLv2 — ancient, completely broken
 		return WrittenInCrayon
 	default:
 		return WrittenInCrayon

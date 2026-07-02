@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -12,41 +13,92 @@ const maxCRLSize = 10 * 1024 * 1024 // 10 MB
 
 // CRLResult holds the result of a CRL revocation check.
 type CRLResult struct {
-	Available    bool      `json:"available"`
-	Fetched      bool      `json:"fetched"`
-	FetchError   string    `json:"fetch_error,omitempty"`
-	IsRevoked    bool      `json:"is_revoked"`
-	RevokedAt    time.Time `json:"revoked_at,omitempty"`
-	RevokeReason string    `json:"revoke_reason,omitempty"`
-	ThisUpdate   time.Time `json:"this_update,omitempty"`
-	NextUpdate   time.Time `json:"next_update,omitempty"`
-	IsStale      bool      `json:"is_stale"`
-	CRLEndpoint  string    `json:"crl_endpoint,omitempty"`
-	CRLSize      int       `json:"crl_size"`
-	EntryCount   int       `json:"entry_count"`
+	Available       bool      `json:"available"`
+	Fetched         bool      `json:"fetched"`
+	FetchError      string    `json:"fetch_error,omitempty"`
+	IsRevoked       bool      `json:"is_revoked"`
+	RevokedAt       time.Time `json:"revoked_at,omitempty"`
+	RevokeReason    string    `json:"revoke_reason,omitempty"`
+	ThisUpdate      time.Time `json:"this_update,omitempty"`
+	NextUpdate      time.Time `json:"next_update,omitempty"`
+	IsStale         bool      `json:"is_stale"`
+	CRLEndpoint     string    `json:"crl_endpoint,omitempty"`
+	CRLSize         int       `json:"crl_size"`
+	EntryCount      int       `json:"entry_count"`
+	IsLDAP          bool      `json:"is_ldap,omitempty"`           // True if the CRL endpoint is LDAP
+	LDAPEndpoint    string    `json:"ldap_endpoint,omitempty"`     // The LDAP URI for display
+	AllEndpoints    []string  `json:"all_endpoints,omitempty"`     // All CRL distribution point URIs
+	SkippedLDAP     []string  `json:"skipped_ldap,omitempty"`      // LDAP URIs that were skipped
 }
 
 // CheckCRL performs a CRL revocation check for the given certificate.
-// It fetches the CRL from the first distribution point, verifies
-// it against the issuer, and checks whether the leaf cert is revoked.
+// It iterates through all CRL distribution points:
+//   - HTTP/HTTPS endpoints are fetched and checked
+//   - LDAP endpoints are noted but not fetched (Go has no native LDAP support)
+//
+// The first successful HTTP fetch is used for the revocation check.
 func CheckCRL(cert *x509.Certificate, issuer *x509.Certificate, timeout time.Duration) CRLResult {
 	if len(cert.CRLDistributionPoints) == 0 {
 		return CRLResult{Available: false}
 	}
 
-	crlEndpoint := cert.CRLDistributionPoints[0]
 	result := CRLResult{
-		Available:   true,
-		CRLEndpoint: crlEndpoint,
+		Available:    true,
+		AllEndpoints: cert.CRLDistributionPoints,
 	}
 
-	// Fetch CRL with timeout and size limit.
+	// Categorize endpoints and try HTTP ones
+	for _, endpoint := range cert.CRLDistributionPoints {
+		if isLDAPEndpoint(endpoint) {
+			result.SkippedLDAP = append(result.SkippedLDAP, endpoint)
+			continue
+		}
+
+		if !isHTTPEndpoint(endpoint) {
+			// Unknown scheme — skip
+			continue
+		}
+
+		// Try this HTTP endpoint
+		fetchResult := fetchAndCheckCRL(cert, issuer, endpoint, timeout)
+		if fetchResult.Fetched {
+			// Success — use this result
+			fetchResult.Available = true
+			fetchResult.AllEndpoints = result.AllEndpoints
+			fetchResult.SkippedLDAP = result.SkippedLDAP
+			return fetchResult
+		}
+
+		// HTTP fetch failed — record the error but try next endpoint
+		if result.FetchError == "" {
+			result.CRLEndpoint = endpoint
+			result.FetchError = fetchResult.FetchError
+		}
+	}
+
+	// No HTTP endpoint succeeded
+	if len(result.SkippedLDAP) > 0 && result.CRLEndpoint == "" {
+		// Only LDAP endpoints available
+		result.IsLDAP = true
+		result.LDAPEndpoint = result.SkippedLDAP[0]
+		result.CRLEndpoint = result.SkippedLDAP[0]
+	}
+
+	return result
+}
+
+// fetchAndCheckCRL fetches a CRL from an HTTP endpoint, verifies the
+// signature against the issuer, and checks if the cert is revoked.
+func fetchAndCheckCRL(cert *x509.Certificate, issuer *x509.Certificate, endpoint string, timeout time.Duration) CRLResult {
+	result := CRLResult{
+		CRLEndpoint: endpoint,
+	}
+
 	client := &http.Client{Timeout: timeout}
-	resp, err := client.Get(crlEndpoint)
+	resp, err := client.Get(endpoint)
 	if err != nil {
 		errMsg := err.Error()
-		// Surface TLS-specific errors for HTTPS endpoints.
-		if isHTTPS(crlEndpoint) {
+		if isHTTPS(endpoint) {
 			result.FetchError = fmt.Sprintf("CRL endpoint TLS error: %s", errMsg)
 		} else {
 			result.FetchError = errMsg
@@ -101,5 +153,24 @@ func CheckCRL(cert *x509.Certificate, issuer *x509.Certificate, timeout time.Dur
 
 // isHTTPS reports whether a URL starts with https://.
 func isHTTPS(url string) bool {
-	return len(url) >= 8 && url[:8] == "https://"
+	return len(url) >= 8 && strings.EqualFold(url[:8], "https://")
+}
+
+// isHTTPEndpoint reports whether a URL starts with http:// or https://.
+func isHTTPEndpoint(url string) bool {
+	lower := strings.ToLower(url)
+	return strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://")
+}
+
+// isLDAPEndpoint reports whether a URL starts with ldap:// or ldaps://.
+func isLDAPEndpoint(url string) bool {
+	lower := strings.ToLower(url)
+	return strings.HasPrefix(lower, "ldap://") || strings.HasPrefix(lower, "ldaps://")
+}
+
+// LDAPSearchCommand generates an ldapsearch command for querying a CRL
+// from an LDAP distribution point (typically Microsoft AD CS).
+func LDAPSearchCommand(ldapURI string) string {
+	// The LDAP URI already contains the full query — ldapsearch can use it directly
+	return fmt.Sprintf("ldapsearch -x -H \"%s\" -s base certificateRevocationList", ldapURI)
 }
