@@ -3,6 +3,7 @@ package education
 import (
 	"fmt"
 	"math/rand"
+	"strings"
 
 	"github.com/thexsa/peep/internal/analyzer"
 )
@@ -660,3 +661,247 @@ var ocspStapleMissingSayings = []string{
 	"No staple. If the cert has Must-Staple enabled, this is a connection killer.",
 	"OCSP staple? Absent. Privacy for your users? Also absent. Enable stapling.",
 }
+
+// --- CT/SCT Warning Check ---
+
+// CheckCTWarnings generates warnings based on Certificate Transparency results.
+func CheckCTWarnings(ct analyzer.CTLogResult) []analyzer.Warning {
+	var w []analyzer.Warning
+
+	if ct.IsPrivateCA {
+		// Private CA — no warning needed, CT doesn't apply
+		return w
+	}
+
+	if ct.Error != "" {
+		w = append(w, analyzer.Warning{
+			Code:     "CT_PARSE_ERROR",
+			Severity: analyzer.MallCopCredentials,
+			Title:    "Could Not Parse SCT Extensions",
+			Detail:   "The SCT extension was present but could not be parsed: " + ct.Error,
+			Why:      pick(ctParseSayings),
+			Explain:  "Signed Certificate Timestamps (SCTs) are embedded in the certificate by the CA during issuance. They are cryptographic proof that the certificate was submitted to Certificate Transparency logs before it was issued. If the SCT extension is malformed, clients cannot verify CT compliance. Chrome requires at least 2 SCTs from independent logs for certificates issued by publicly-trusted CAs.",
+			Fix:      "This is typically a CA-side issue — the CA embedded a malformed SCT extension. Contact your CA or re-issue the certificate. Verify the raw cert with: openssl x509 -in cert.pem -text -noout | grep -A20 'CT Precertificate'",
+			DocRef:   "peep docs certs",
+		})
+	} else if !ct.Found {
+		w = append(w, analyzer.Warning{
+			Code:     "CT_NO_SCTS",
+			Severity: analyzer.MallCopCredentials,
+			Title:    "No Embedded SCTs — Certificate Not Logged in CT",
+			Detail:   "This certificate has no Signed Certificate Timestamps (SCTs). It was not submitted to Certificate Transparency logs.",
+			Why:      pick(ctNoSCTSayings),
+			Explain:  "Certificate Transparency (CT) is a public, append-only log of all certificates issued by publicly-trusted CAs. Chrome, Safari, and Apple platforms require SCTs for certificates to be trusted. Without SCTs, browsers may reject the certificate or show warnings. SCTs are embedded by the CA at issuance time — they prove the cert was logged before it was issued, making rogue or misissued certificates detectable. Missing SCTs usually means: (1) the cert was issued by a private/internal CA (expected — CT doesn't apply), (2) the cert was issued before CT was required, or (3) the CA failed to log it.",
+			Fix:      "If this is a publicly-trusted certificate, contact your CA — they should be embedding SCTs at issuance. If this is an internal/private CA, this warning is expected (use --insecure to skip trust store checks). Re-issuing the cert from a compliant CA will include SCTs automatically.",
+			DocRef:   "peep docs certs",
+		})
+	}
+
+	return w
+}
+
+var ctNoSCTSayings = []string{
+	"No SCTs. Chrome and Safari are going to have strong opinions about this.",
+	"Zero SCTs embedded. This cert skipped the transparency queue entirely.",
+	"No Certificate Transparency proof. It's like a diploma without a seal.",
+	"Missing SCTs. The CA either forgot to log this cert or doesn't care about CT compliance.",
+	"No SCTs found. Browsers that enforce CT will treat this cert with deep suspicion.",
+	"Certificate Transparency? This cert has never heard of it.",
+	"No embedded SCTs. If this were a publicly-trusted cert, browsers would be furious.",
+	"SCTs: zero. Transparency: also zero. This cert is operating in stealth mode.",
+}
+
+var ctParseSayings = []string{
+	"The SCT extension exists but makes no sense. That's worse than missing entirely.",
+	"Malformed SCTs. Someone tried to do Certificate Transparency and failed at the binary encoding part.",
+	"The SCT data is garbage. The CA's CT implementation might need a code review.",
+	"SCT extension present but unparseable. It's like a signed permission slip written in crayon.",
+}
+
+// --- OCSP Live Warning Check ---
+
+// CheckOCSPLiveWarnings generates warnings based on a live OCSP revocation check.
+func CheckOCSPLiveWarnings(ocsp analyzer.OCSPResult) []analyzer.Warning {
+	var w []analyzer.Warning
+
+	switch ocsp.Status {
+	case analyzer.OCSPRevoked:
+		w = append(w, analyzer.Warning{
+			Code:     "OCSP_REVOKED",
+			Severity: analyzer.WrittenInCrayon,
+			Title:    "OCSP Responder Says REVOKED",
+			Detail:   fmt.Sprintf("The CA's OCSP responder confirmed this certificate is revoked. Responder: %s", ocsp.ResponderURL),
+			Why:      pick(ocspLiveRevokedSayings),
+			Explain:  "A live query to the CA's OCSP responder returned a REVOKED status. This is definitive — the CA has explicitly revoked this certificate. Any client that checks OCSP (stapled or live) will reject this certificate. The revocation is signed by the CA and cannot be forged. Common reasons for revocation: key compromise, CA compromise, certificate superseded, or affiliation changed.",
+			Fix:      "Replace this certificate immediately. Request a new certificate from your CA, deploy it, and restart the TLS service. If the revocation was due to key compromise, generate a new private key first.",
+			DocRef:   "peep docs ocsp",
+		})
+	case analyzer.OCSPUnknown:
+		w = append(w, analyzer.Warning{
+			Code:     "OCSP_UNKNOWN",
+			Severity: analyzer.MallCopCredentials,
+			Title:    "OCSP Responder Returned 'Unknown'",
+			Detail:   fmt.Sprintf("The OCSP responder does not recognize this certificate. Responder: %s", ocsp.ResponderURL),
+			Why:      pick(ocspLiveUnknownSayings),
+			Explain:  "The CA's OCSP responder returned an 'Unknown' status, meaning it doesn't recognize the certificate serial number. This can happen if: (1) the OCSP responder URL doesn't match the issuing CA, (2) the cert was recently issued and the OCSP responder hasn't been updated, (3) the OCSP responder is misconfigured, or (4) the certificate was issued by a different intermediate than expected.",
+			Fix:      "Verify the certificate chain is correct and the OCSP responder URL matches the issuing CA. Check the Authority Information Access (AIA) extension in the cert for the correct OCSP URL. If the cert was just issued, wait a few minutes and try again.",
+			DocRef:   "peep docs ocsp",
+		})
+	case analyzer.OCSPError:
+		if ocsp.Error != "" {
+			w = append(w, analyzer.Warning{
+				Code:     "OCSP_ERROR",
+				Severity: analyzer.MallCopCredentials,
+				Title:    "OCSP Check Failed",
+				Detail:   "Could not complete OCSP revocation check: " + ocsp.Error,
+				Why:      pick(ocspLiveErrorSayings),
+				Explain:  "The live OCSP check failed — we couldn't get a definitive answer on whether this certificate is revoked. This could be a network issue, a timeout, or a problem with the CA's OCSP responder. Clients with soft-fail OCSP policies (the default in most browsers) will silently ignore this failure and trust the cert anyway. Clients with hard-fail policies will reject the connection.",
+				Fix:      "Check if the OCSP responder URL is reachable: curl -v <OCSP URL>. If it's a timeout, the CA's OCSP infrastructure may be slow or down. If the URL is wrong, check the AIA extension in the certificate.",
+				DocRef:   "peep docs ocsp",
+			})
+		}
+	}
+
+	return w
+}
+
+var ocspLiveRevokedSayings = []string{
+	"The CA said REVOKED. Not 'maybe revoked.' Not 'kinda revoked.' REVOKED. Full stop.",
+	"OCSP returned Revoked. This cert is officially dead. The CA signed the death certificate.",
+	"Revoked via OCSP. The CA pulled the plug and told the whole internet about it.",
+	"The OCSP responder said no. The CA said no. Everyone says no. Replace this cert.",
+	"OCSP: Revoked. That's the CA's way of saying 'we regret to inform you...'",
+	"This cert is revoked. The CA's OCSP responder just confirmed it. Live. In real time.",
+}
+
+var ocspLiveUnknownSayings = []string{
+	"OCSP says 'Unknown.' The CA's responder doesn't recognize this cert. That's... not great.",
+	"The OCSP responder shrugged. It doesn't know this cert. Identity crisis.",
+	"Unknown status from OCSP. Either the responder is misconfigured or this cert is a stranger.",
+	"OCSP returned 'Unknown.' The responder and this cert have never met, apparently.",
+	"The CA's OCSP responder doesn't recognize this cert. That's like your own employer not knowing you.",
+}
+
+var ocspLiveErrorSayings = []string{
+	"OCSP check failed. We tried to verify revocation and the universe said 'no.'",
+	"Couldn't reach the OCSP responder. Revocation status: a complete mystery.",
+	"OCSP error. The CA's responder is either down, slow, or just not in the mood.",
+	"Failed to query OCSP. Soft-fail clients will shrug. Hard-fail clients will bail.",
+	"The OCSP responder didn't respond. Ironic, isn't it?",
+}
+
+// --- Cipher Enumeration Warning Check ---
+
+// CheckCipherEnumWarnings generates warnings for insecure cipher suites found during enumeration.
+func CheckCipherEnumWarnings(result analyzer.CipherEnumResult) []analyzer.Warning {
+	var w []analyzer.Warning
+
+	var insecure []string
+	for _, s := range result.SupportedSuites {
+		if !s.Secure {
+			insecure = append(insecure, s.Name)
+		}
+	}
+
+	if len(insecure) > 0 {
+		detail := fmt.Sprintf("Server supports %d insecure cipher suite(s): %s", len(insecure), strings.Join(insecure, ", "))
+		if len(detail) > 200 {
+			detail = fmt.Sprintf("Server supports %d insecure cipher suite(s). Run 'peep scan' to see the full list.", len(insecure))
+		}
+		w = append(w, analyzer.Warning{
+			Code:     "CIPHER_ENUM_INSECURE",
+			Severity: analyzer.WrittenInCrayon,
+			Title:    fmt.Sprintf("Server Accepts %d Insecure Cipher Suite(s)", len(insecure)),
+			Detail:   detail,
+			Why:      pick(cipherEnumInsecureSayings),
+			Explain:  "The server was probed with individual cipher suites and accepted one or more that are considered insecure. Insecure ciphers include those using CBC mode (vulnerable to BEAST, Lucky13, POODLE), RC4 (biased keystream), 3DES (Sweet32 attack, 64-bit block), NULL encryption, export-grade ciphers, and suites without forward secrecy (static RSA key exchange). An attacker who can intercept traffic may be able to decrypt it using known vulnerabilities in these ciphers.",
+			Fix:      "Disable insecure cipher suites in your server configuration. In nginx: ssl_ciphers 'ECDHE+AESGCM:ECDHE+CHACHA20:DHE+AESGCM:!aNULL:!MD5:!DSS'; In Apache: SSLCipherSuite ECDHE+AESGCM:ECDHE+CHACHA20:DHE+AESGCM:!aNULL:!MD5. Prefer AEAD ciphers (GCM, ChaCha20-Poly1305) with ECDHE key exchange.",
+			DocRef:   "peep docs ciphers",
+		})
+	}
+
+	return w
+}
+
+var cipherEnumInsecureSayings = []string{
+	"The server accepted insecure ciphers when asked nicely. That's the problem.",
+	"Insecure ciphers are enabled. An attacker doesn't need a zero-day — just a downgrade.",
+	"The server supports ciphers that were broken years ago. An archaeologist's dream.",
+	"These cipher suites belong in a museum, not a production server.",
+	"The server said 'yes' to ciphers it should have said 'absolutely not' to.",
+	"Insecure ciphers enabled. Every vulnerability scanner on the planet is flagging this right now.",
+	"The server accepts ciphers that cryptographers have been begging people to disable since 2015.",
+	"These ciphers have more CVEs than features. Disable them.",
+}
+
+// --- TLS Version Probe Warning Check ---
+
+// CheckTLSVersionProbeWarnings generates warnings for old TLS/SSL versions
+// that were found to be supported during version probing.
+func CheckTLSVersionProbeWarnings(result analyzer.CipherEnumResult) []analyzer.Warning {
+	var w []analyzer.Warning
+
+	for _, v := range result.TLSVersions {
+		if !v.Supported {
+			continue
+		}
+		switch v.Version {
+		case "SSLv3":
+			w = append(w, analyzer.Warning{
+				Code:     "PROBE_SSLV3",
+				Severity: analyzer.WrittenInCrayon,
+				Title:    "Server Supports SSLv3",
+				Detail:   "SSLv3 is enabled on this server. It was deprecated in 2015 (RFC 7568) due to the POODLE attack.",
+				Why:      pick(probeSslv3Sayings),
+				Explain:  "SSLv3 (from 1996) is fundamentally broken. The POODLE attack (CVE-2014-3566) allows an attacker to decrypt SSLv3 traffic by exploiting its CBC padding scheme. There is no fix — the protocol itself is flawed. RFC 7568 (June 2015) formally deprecated SSLv3 and declared it MUST NOT be used. Any server still accepting SSLv3 connections is vulnerable to downgrade attacks where a man-in-the-middle forces the client to use SSLv3 instead of TLS.",
+				Fix:      "Disable SSLv3 immediately. In nginx: ssl_protocols TLSv1.2 TLSv1.3; In Apache: SSLProtocol all -SSLv2 -SSLv3 -TLSv1 -TLSv1.1. In OpenSSL-based configs: MinProtocol = TLSv1.2. Verify with: peep scan <host>",
+				DocRef:   "peep docs tls",
+			})
+		case "TLSv1.0":
+			w = append(w, analyzer.Warning{
+				Code:     "PROBE_TLSV10",
+				Severity: analyzer.WrittenInCrayon,
+				Title:    "Server Supports TLS 1.0",
+				Detail:   "TLS 1.0 is enabled on this server. It was deprecated in 2021 (RFC 8996).",
+				Why:      pick(probeTlsOldSayings),
+				Explain:  "TLS 1.0 (from 1999) has known vulnerabilities including BEAST (CVE-2011-3389) and POODLE variants. It uses a 2-round-trip handshake with weak cipher negotiation. RFC 8996 (March 2021) officially deprecated TLS 1.0 and 1.1. PCI-DSS, HIPAA, NIST SP 800-52, and FedRAMP all require TLS 1.2 or higher. All major browsers dropped TLS 1.0 support in 2020.",
+				Fix:      "Disable TLS 1.0 in your server configuration. In nginx: ssl_protocols TLSv1.2 TLSv1.3; In Apache: SSLProtocol all -SSLv3 -TLSv1 -TLSv1.1. Minimum: TLS 1.2. Preferred: TLS 1.3.",
+				DocRef:   "peep docs tls",
+			})
+		case "TLSv1.1":
+			w = append(w, analyzer.Warning{
+				Code:     "PROBE_TLSV11",
+				Severity: analyzer.WrittenInCrayon,
+				Title:    "Server Supports TLS 1.1",
+				Detail:   "TLS 1.1 is enabled on this server. It was deprecated in 2021 (RFC 8996).",
+				Why:      pick(probeTlsOldSayings),
+				Explain:  "TLS 1.1 (from 2006) was deprecated alongside TLS 1.0 by RFC 8996 (March 2021). While slightly better than 1.0, it still lacks AEAD ciphers, has a slower 2-round-trip handshake, and is no longer considered secure. All major compliance frameworks require TLS 1.2 minimum.",
+				Fix:      "Disable TLS 1.1 in your server configuration. In nginx: ssl_protocols TLSv1.2 TLSv1.3; In Apache: SSLProtocol all -SSLv3 -TLSv1 -TLSv1.1. Verify with: peep scan <host>",
+				DocRef:   "peep docs tls",
+			})
+		}
+	}
+
+	return w
+}
+
+var probeSslv3Sayings = []string{
+	"SSLv3 is from 1996. It was broken in 2014. That's a decade of 'please disable this.'",
+	"SSLv3 enabled. POODLE says thanks for the easy target.",
+	"This server still speaks SSLv3. The '90s called — they want their protocol back.",
+	"SSLv3 was deprecated by RFC 7568 in 2015. Ten years ago. TEN.",
+	"POODLE (CVE-2014-3566) killed SSLv3. Why is the corpse still answering handshakes?",
+	"SSLv3 is enabled. Every security scanner on the planet is flagging this.",
+}
+
+var probeTlsOldSayings = []string{
+	"This version was deprecated by RFC 8996 in 2021. Yet here it is, still answering calls.",
+	"Deprecated. Browsers dropped it. Compliance frameworks banned it. Your server still supports it.",
+	"This TLS version is so old it can legally buy alcohol in most countries.",
+	"RFC 8996 said MUST NOT USE. Your server said 'watch me.'",
+	"Every major browser removed this version in 2020. Your server didn't get the memo.",
+	"PCI-DSS, HIPAA, NIST, and FedRAMP all say no. Your server says yes. Somebody's wrong.",
+	"This version is a downgrade attack waiting to happen. Disable it.",
+	"Deprecated in 2021. Browsers killed it in 2020. Your server is running a zombie protocol.",
+}
+

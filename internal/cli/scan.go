@@ -145,6 +145,15 @@ func runScan(cmd *cobra.Command, args []string) error {
 				timeout,
 			)
 			fmt.Println(ui.RenderOCSPResult(ocspResult))
+
+			// Collect OCSP live warnings
+			ocspWarnings := education.CheckOCSPLiveWarnings(ocspResult)
+			allWarnings = append(allWarnings, ocspWarnings...)
+			for _, w := range ocspWarnings {
+				if w.Severity > chain.OverallGrade {
+					chain.OverallGrade = w.Severity
+				}
+			}
 		} else if leaf.IsSelfSigned {
 			fmt.Println(ui.Theme.MutedStyle.Render("  Skipping OCSP — self-signed cert"))
 			fmt.Println()
@@ -177,12 +186,25 @@ func runScan(cmd *cobra.Command, args []string) error {
 		fmt.Println(ui.Theme.MutedStyle.Render("  Checking Certificate Transparency (embedded SCTs)..."))
 		ctResult := analyzer.CheckCTLogs(leaf.RawCert, chain.TrustStoreVerified)
 		fmt.Println(ui.RenderCTLogResult(ctResult))
+
+		// Collect CT warnings
+		ctWarnings := education.CheckCTWarnings(ctResult)
+		allWarnings = append(allWarnings, ctWarnings...)
+		for _, w := range ctWarnings {
+			if w.Severity > chain.OverallGrade {
+				chain.OverallGrade = w.Severity
+			}
+		}
 	}
 
 	// Cipher suite enumeration
 	fmt.Println(ui.Theme.MutedStyle.Render("  Enumerating supported cipher suites (this may take a moment)..."))
 	cipherResult := analyzer.EnumerateCiphers(host, port, timeout)
 	fmt.Println(ui.RenderCipherEnum(cipherResult))
+
+	// Collect cipher and TLS version probe warnings
+	allWarnings = append(allWarnings, education.CheckCipherEnumWarnings(cipherResult)...)
+	allWarnings = append(allWarnings, education.CheckTLSVersionProbeWarnings(cipherResult)...)
 
 	// Cert cards (always shown in scan, or gated by -d if you prefer)
 	for _, cert := range chain.Certificates {
