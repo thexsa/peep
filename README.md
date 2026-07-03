@@ -110,6 +110,15 @@ peep --json example.com | jq '.overall_status'
 peep --json --explain example.com | jq '.warnings[].fix'
 ```
 
+### 💡 Contextual Examples (`--examples`)
+Not sure how to use a command? Add `--examples` to any command for graduated usage examples — from simple to advanced — always ending with JSON + `jq` extraction queries:
+```bash
+peep --examples               # Examples for the root command
+peep scan --examples           # Examples for deep scans
+peep docs --examples           # Examples for the docs browser
+peep update --examples         # Examples for self-update
+```
+
 ### 🔒 CRL & Revocation Intelligence
 The deep scan checks CRL revocation by fetching the Certificate Revocation List and verifying the certificate serial is not present.
 
@@ -282,6 +291,11 @@ peep update --check
 
 # Update to latest version
 peep update
+
+# Contextual examples for any command
+peep --examples
+peep scan --examples
+peep docs --examples
 ```
 
 ### All Flags
@@ -301,6 +315,7 @@ Every flag has a standard name and a fun themed alias. Use whichever speaks to y
 | `-s` | `--save` | `--polaroid` | Save cert PEM(s) to files. No value = all, or specify index |
 | `-t` | `--timeout` | `--blink` | Connection timeout in seconds (default: 5) |
 | `-v` | `--verbose` | `--stare` | Show base64 PEM encoded certs |
+| | `--examples` | `--show-me` | Show contextual usage examples with jq queries |
 | | `--internal-ca` | | Adjust grading for internal/private CA certs (skips SCT and 398-day checks) |
 | | `--ca-bundle` | | Path to CA certificate bundle (.pem, .crt, .cer, .der) — replaces system trust store |
 

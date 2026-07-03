@@ -17,6 +17,9 @@ var versionCmd = &cobra.Command{
 	Use:   "version",
 	Short: "Print the version of peep",
 	Run: func(cmd *cobra.Command, args []string) {
+		if showExamples(cmd.Name()) {
+			return
+		}
 		method := updater.DetectInstallMethod(Version)
 		platform := fmt.Sprintf("%s/%s", runtime.GOOS, runtime.GOARCH)
 		fmt.Println(ui.RenderVersion(Version, method.String(), platform))

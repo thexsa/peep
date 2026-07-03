@@ -43,8 +43,9 @@ and documentation references for every finding. Works on all peep commands.
 Examples:
   peep scan example.com
   peep scan --explain example.com
-  peep scan --whytho internal-server.local`,
-	Args: cobra.ExactArgs(1),
+  peep scan --whytho internal-server.local
+  peep scan --examples          Show detailed scan examples with jq queries`,
+	Args: cobra.MaximumNArgs(1),
 	RunE: runScan,
 }
 
@@ -53,6 +54,14 @@ func init() {
 }
 
 func runScan(cmd *cobra.Command, args []string) error {
+	if showExamples(cmd.Name()) {
+		return nil
+	}
+
+	if len(args) == 0 {
+		return cmd.Help()
+	}
+
 	if flagPlainText {
 		ui.EnablePlainText()
 	}

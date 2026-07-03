@@ -227,6 +227,10 @@ type jsonSearchMatch struct {
 }
 
 func runDocs(cmd *cobra.Command, args []string) error {
+	if showExamples(cmd.Name()) {
+		return nil
+	}
+
 	if flagPlainText {
 		ui.EnablePlainText()
 	}

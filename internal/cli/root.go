@@ -59,7 +59,12 @@ Examples:
   peep docs                     Browse the built-in TLS reference guide
   peep docs --search java       Search docs for a keyword
   peep docs --all               Show all docs at once (man-page style)
-  peep docs crl --json          Output a doc topic as JSON`,
+  peep docs crl --json          Output a doc topic as JSON
+
+Use --examples on any command for detailed usage examples with jq queries:
+  peep --examples               Show examples for the root command
+  peep scan --examples          Show examples for deep scans
+  peep docs --examples          Show examples for the docs browser`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runPeep,
 }
@@ -113,8 +118,12 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&flagCABundle, "ca-bundle", "",
 		"Path to a CA certificate bundle (.pem, .crt, .cer, .der) — replaces system trust store")
 
+	// --examples / --show-me
+	rootCmd.PersistentFlags().BoolVar(&flagExamples, "examples", false, "Show contextual usage examples with jq queries")
+	rootCmd.PersistentFlags().BoolVar(&flagExamples, "show-me", false, "Show usage examples (alias for --examples)")
+
 	// Hide themed aliases from help — they'll be mentioned in primary flag descriptions
-	for _, alias := range []string{"lens", "blink", "shades", "blindfold", "stare", "gaze", "whytho", "polaroid"} {
+	for _, alias := range []string{"lens", "blink", "shades", "blindfold", "stare", "gaze", "whytho", "polaroid", "show-me"} {
 		rootCmd.PersistentFlags().MarkHidden(alias)
 	}
 }
@@ -235,6 +244,10 @@ func isSaveRequested(cmd *cobra.Command) bool {
 }
 
 func runPeep(cmd *cobra.Command, args []string) error {
+	if showExamples(cmd.Name()) {
+		return nil
+	}
+
 	if len(args) == 0 {
 		return cmd.Help()
 	}
