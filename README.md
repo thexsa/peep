@@ -1,8 +1,6 @@
 # 👀 peep — TLS diagnostics in plain English
 
-**Stop memorizing openssl flags.** peep tells you what's wrong with a certificate or connection — in plain English, not hex dumps.
-
-Built for **support engineers**, sysadmins, and anyone who's ever Googled _"openssl check certificate command"_ for the 47th time.
+peep is a TLS diagnostic tool for support engineers, SREs, platform folks, and anyone who is tired of pretending hex dumps are a personality. It peeps into TLS handshakes & certificate chains, & tells you what's broken in plain English, instead of cryptographic cave paintings — because _"PKIX path building failed"_ was not helpful.
 
 ```
 $ peep self-signed.badssl.com
@@ -390,37 +388,41 @@ peep do<TAB>     →  peep docs
 peep --ex<TAB>   →  peep --explain
 ```
 
-#### Setup (one-time)
+#### Auto-Install (recommended)
 
-**Zsh** (macOS default):
+One command — peep detects your shell and sets everything up:
 ```bash
-# Add to your ~/.zshrc:
-source <(peep completion zsh)
-
-# Or install permanently:
-peep completion zsh > "${fpath[1]}/_peep"
+peep completion --install
 ```
 
-**Bash:**
+This will:
+- Detect your current shell (zsh, bash, fish, or PowerShell)
+- Write the completion script to `~/.peep/completions/`
+- Append the necessary source line to your shell's rc file (`.zshrc`, `.bashrc`, etc.)
+- **Never overwrite** — only appends if not already present
+- Running it again is safe (idempotent)
+
+You can also specify the shell explicitly:
 ```bash
-# Current session:
-source <(peep completion bash)
-
-# Permanent (Linux):
-peep completion bash > /etc/bash_completion.d/peep
-
-# Permanent (macOS with bash-completion):
-peep completion bash > $(brew --prefix)/etc/bash_completion.d/peep
+peep completion zsh --install
+peep completion bash --install
+peep completion fish --install
+peep completion powershell --install
 ```
 
-**Fish:**
-```bash
-peep completion fish > ~/.config/fish/completions/peep.fish
-```
-
-**PowerShell:**
+**Windows / PowerShell:** `peep completion --install` appends to your `$PROFILE`. If you get an execution policy error, run:
 ```powershell
-peep completion powershell | Out-String | Invoke-Expression
+Set-ExecutionPolicy RemoteSigned -Scope CurrentUser
+```
+
+#### Manual Setup (alternative)
+
+If you prefer to manage it yourself, generate the script to stdout:
+```bash
+peep completion zsh          # print to stdout
+peep completion bash         # print to stdout
+peep completion fish         # print to stdout
+peep completion powershell   # print to stdout
 ```
 
 > **Note:** Autocompletion requires `peep` to be in your `$PATH` (not just `./peep`). See the [Installation](#installation) section.

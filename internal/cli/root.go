@@ -38,9 +38,11 @@ var (
 var rootCmd = &cobra.Command{
 	Use:   "peep <host>[:<port>]",
 	Short: "peep — your digital eyes for TLS diagnostics",
-	Long: `peep is a TLS diagnostic tool built for support engineers.
-It peeps into TLS handshakes and certificate chains to tell you
-exactly what's wrong — in plain English, not hex dumps.
+	Long: `peep is a TLS diagnostic tool for support engineers, SREs, platform
+folks, and anyone who is tired of pretending hex dumps are a personality.
+It peeps into TLS handshakes & certificate chains, & tells you what's
+broken in plain English, instead of cryptographic cave paintings — because
+"PKIX path building failed" was not helpful.
 
 Smart protocol detection: peep handles HTTPS, SMTP, RDP, LDAP,
 FTP, and more. Just give it a host and port.
