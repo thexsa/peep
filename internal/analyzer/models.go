@@ -200,3 +200,20 @@ type DiagnosticReport struct {
 	Timestamp     time.Time         `json:"timestamp"`
 	InternalCAMode bool            `json:"internal_ca_mode,omitempty"`
 }
+
+// ScanReport wraps all results from a deep scan for JSON output.
+type ScanReport struct {
+	Target         TargetInfo         `json:"target"`
+	Handshake      HandshakeAnalysis  `json:"handshake"`
+	Chain          ChainAnalysis      `json:"chain"`
+	OCSPStaple     *OCSPStapleResult  `json:"ocsp_staple,omitempty"`
+	OCSP           *OCSPResult        `json:"ocsp,omitempty"`
+	CRL            *CRLResult         `json:"crl,omitempty"`
+	CT             *CTLogResult       `json:"ct,omitempty"`
+	Ciphers        *CipherEnumResult  `json:"ciphers,omitempty"`
+	CAOrigin       *CAOriginResult    `json:"ca_origin,omitempty"`
+	Warnings       []Warning          `json:"warnings,omitempty"`
+	OverallStatus  HealthStatus       `json:"overall_status"`
+	ScanDurationMs int64              `json:"scan_duration_ms"`
+	Timestamp      time.Time          `json:"timestamp"`
+}

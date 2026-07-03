@@ -10,26 +10,26 @@ import (
 
 // CipherEnumResult holds the results of cipher suite enumeration.
 type CipherEnumResult struct {
-	SupportedSuites []CipherSuiteInfo
-	TLSVersions     []TLSVersionSupport
-	Error           string
+	SupportedSuites []CipherSuiteInfo   `json:"supported_suites,omitempty"`
+	TLSVersions     []TLSVersionSupport `json:"tls_versions,omitempty"`
+	Error           string              `json:"error,omitempty"`
 }
 
 // CipherSuiteInfo describes a single supported cipher suite.
 type CipherSuiteInfo struct {
-	ID       uint16
-	Name     string
-	Version  string // TLS version required
-	Secure   bool   // Whether Go considers this secure
-	Grade    HealthStatus
+	ID       uint16       `json:"id"`
+	Name     string       `json:"name"`
+	Version  string       `json:"version"`
+	Secure   bool         `json:"secure"`
+	Grade    HealthStatus `json:"grade"`
 }
 
 // TLSVersionSupport describes whether a specific TLS version is supported.
 type TLSVersionSupport struct {
-	Version   string
-	VersionID uint16
-	Supported bool
-	Grade     HealthStatus
+	Version   string       `json:"version"`
+	VersionID uint16       `json:"version_id"`
+	Supported bool         `json:"supported"`
+	Grade     HealthStatus `json:"grade"`
 }
 
 // EnumerateCiphers probes the target to determine which TLS versions and

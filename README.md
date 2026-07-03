@@ -294,10 +294,10 @@ Every flag has a standard name and a fun themed alias. Use whichever speaks to y
 | `-e` | `--explain` | `--whytho` | Explain each issue with fix recommendations and doc references |
 | `-h` | `--help` | | Show help |
 | `-i` | `--insecure` | `--blindfold` | Skip system trust store verification |
-| `-j` | `--json` | `--monocle` | JSON output for scripting (respects -d, -v, -e) |
+| `-j` | `--json` | | JSON output for scripting (respects -d, -v, -e) |
 | `-p` | `--plain-text` | `--shades` | No color, no emoji, no Unicode — easy to copy/paste |
 | `-P` | `--proto` | `--lens` | Force protocol: `tls`, `smtp`, `rdp`, `ldap`, `ftp` |
-| `-r` | `--raw` | `--ogle` | Raw x509 text output for each cert (like `openssl x509 -text`) |
+| `-r` | `--raw` | | Raw x509 text output for each cert (like `openssl x509 -text`) |
 | `-s` | `--save` | `--polaroid` | Save cert PEM(s) to files. No value = all, or specify index |
 | `-t` | `--timeout` | `--blink` | Connection timeout in seconds (default: 5) |
 | `-v` | `--verbose` | `--stare` | Show base64 PEM encoded certs |

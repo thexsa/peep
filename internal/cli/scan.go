@@ -73,8 +73,10 @@ func runScan(cmd *cobra.Command, args []string) error {
 
 	timeout := time.Duration(flagTimeout) * time.Second
 
-	fmt.Println(ui.Theme.MutedStyle.Render("  Starting deep scan..."))
-	fmt.Println()
+	if !flagJSON {
+		fmt.Println(ui.Theme.MutedStyle.Render("  Starting deep scan..."))
+		fmt.Println()
+	}
 
 	startTime := time.Now()
 
@@ -85,8 +87,18 @@ func runScan(cmd *cobra.Command, args []string) error {
 		Proto:   flagProto,
 	})
 	if err != nil {
-		fmt.Println(ui.Theme.ErrorStyle.Render(fmt.Sprintf("\n[FAIL] Failed to connect: %s", err)))
+		if flagJSON {
+			fmt.Printf(`{"error": %q}`, err.Error())
+			fmt.Println()
+		} else {
+			fmt.Println(ui.Theme.ErrorStyle.Render(fmt.Sprintf("\n[FAIL] Failed to connect: %s", err)))
+		}
 		return nil
+	}
+
+	// JSON mode: collect all results silently, output as JSON
+	if flagJSON {
+		return runScanJSON(cmd, result, host, port, timeout, startTime)
 	}
 
 	fmt.Println(ui.RenderBanner(result.Host, result.Port, result.IP, result.Protocol))
@@ -219,7 +231,7 @@ func runScan(cmd *cobra.Command, args []string) error {
 		fmt.Println(ui.RenderCertCard(cert))
 	}
 
-	// -r / --raw / --ogle: Show raw x509 text output
+	// -r / --raw: Show raw x509 text output
 	if flagRaw {
 		renderRawX509(chain)
 	}
@@ -257,6 +269,110 @@ func runScan(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	return nil
+}
+
+func runScanJSON(cmd *cobra.Command, result *probe.ProbeResult, host, port string, timeout time.Duration, startTime time.Time) error {
+	handshake := analyzer.AnalyzeHandshake(result.ConnState)
+	chain := analyzer.AnalyzeChain(result.ConnState, host, flagInsecure, flagCABundle)
+
+	report := analyzer.ScanReport{
+		Target: analyzer.TargetInfo{
+			Host:     result.Host,
+			Port:     result.Port,
+			IP:       result.IP,
+			Protocol: result.Protocol,
+		},
+		Handshake: handshake,
+		Chain:     chain,
+		Timestamp: time.Now(),
+	}
+
+	// Collect warnings from education package
+	diagReport := &analyzer.DiagnosticReport{
+		Handshake: handshake,
+		Chain:     chain,
+	}
+	var allWarnings []analyzer.Warning
+	allWarnings = append(allWarnings, education.BuildWarnings(diagReport, flagInternalCA)...)
+
+	// OCSP Staple
+	if len(result.ConnState.PeerCertificates) >= 2 {
+		stapleResult := analyzer.CheckOCSPStaple(result.ConnState, result.ConnState.PeerCertificates[1])
+		report.OCSPStaple = &stapleResult
+		allWarnings = append(allWarnings, education.CheckOCSPStapleWarnings(stapleResult)...)
+	}
+
+	// OCSP Live
+	if len(result.ConnState.PeerCertificates) >= 2 {
+		ocspResult := analyzer.CheckOCSP(result.ConnState.PeerCertificates[0], result.ConnState.PeerCertificates[1], timeout)
+		report.OCSP = &ocspResult
+		allWarnings = append(allWarnings, education.CheckOCSPLiveWarnings(ocspResult)...)
+	}
+
+	// CRL
+	if len(result.ConnState.PeerCertificates) >= 2 {
+		crlResult := analyzer.CheckCRL(result.ConnState.PeerCertificates[0], result.ConnState.PeerCertificates[1], timeout)
+		report.CRL = &crlResult
+		allWarnings = append(allWarnings, education.CheckCRLWarnings(crlResult)...)
+	}
+
+	// CT
+	if len(chain.Certificates) > 0 {
+		leaf := chain.Certificates[0]
+		ctResult := analyzer.CheckCTLogs(leaf.RawCert, chain.TrustStoreVerified)
+		report.CT = &ctResult
+		allWarnings = append(allWarnings, education.CheckCTWarnings(ctResult, flagInternalCA)...)
+
+		// CA Origin
+		if !flagInternalCA {
+			caOrigin := analyzer.DetectCAOrigin(chain, leaf.RawCert, ctResult.Found)
+			report.CAOrigin = &caOrigin
+		}
+	}
+
+	// Ciphers
+	cipherResult := analyzer.EnumerateCiphers(host, port, timeout)
+	report.Ciphers = &cipherResult
+	allWarnings = append(allWarnings, education.CheckCipherEnumWarnings(cipherResult)...)
+	allWarnings = append(allWarnings, education.CheckTLSVersionProbeWarnings(cipherResult)...)
+
+	// Calculate overall grade
+	overallStatus := chain.OverallGrade
+	if handshake.OverallGrade > overallStatus {
+		overallStatus = handshake.OverallGrade
+	}
+	for _, w := range allWarnings {
+		if w.Severity > overallStatus {
+			overallStatus = w.Severity
+		}
+	}
+
+	// Strip explain/fix unless --explain
+	if !flagExplain {
+		stripped := make([]analyzer.Warning, len(allWarnings))
+		for i, w := range allWarnings {
+			stripped[i] = analyzer.Warning{
+				Code:     w.Code,
+				Severity: w.Severity,
+				Title:    w.Title,
+				Detail:   w.Detail,
+			}
+		}
+		allWarnings = stripped
+	}
+	// Sanitize all warning string fields for clean JSON output
+	allWarnings = sanitizeWarnings(allWarnings)
+
+	report.Warnings = allWarnings
+	report.OverallStatus = overallStatus
+	report.ScanDurationMs = time.Since(startTime).Milliseconds()
+
+	data, err := marshalCleanJSON(report)
+	if err != nil {
+		return fmt.Errorf("failed to marshal JSON: %w", err)
+	}
+	fmt.Println(string(data))
 	return nil
 }
 

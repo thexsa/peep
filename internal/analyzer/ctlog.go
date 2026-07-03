@@ -11,18 +11,18 @@ import (
 
 // CTLogResult holds the result of a Certificate Transparency check.
 type CTLogResult struct {
-	Found       bool
-	SCTs        []SCTEntry // Individual SCT entries parsed from the cert
-	Error       string
-	IsPrivateCA bool // Whether the issuing CA is private (not publicly trusted)
+	Found       bool       `json:"found"`
+	SCTs        []SCTEntry `json:"scts,omitempty"`
+	Error       string     `json:"error,omitempty"`
+	IsPrivateCA bool       `json:"is_private_ca"`
 }
 
 // SCTEntry represents a single Signed Certificate Timestamp embedded in a cert.
 type SCTEntry struct {
-	LogID     string // Hex-encoded SHA-256 of the log's public key
-	LogName   string // Human-readable log name (if known)
-	Timestamp time.Time
-	Version   uint8
+	LogID     string    `json:"log_id"`
+	LogName   string    `json:"log_name"`
+	Timestamp time.Time `json:"timestamp"`
+	Version   uint8     `json:"version"`
 }
 
 // sctExtensionOID is the OID for the SCT List extension (1.3.6.1.4.1.11129.2.4.2).

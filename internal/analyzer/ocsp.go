@@ -14,15 +14,15 @@ import (
 
 // OCSPResult holds the result of an OCSP check.
 type OCSPResult struct {
-	Status      OCSPStatus
-	StatusText  string
-	ProducedAt  time.Time
-	ThisUpdate  time.Time
-	NextUpdate  time.Time
-	RevokedAt   time.Time
-	RevokeReason string
-	ResponderURL string
-	Error       string
+	Status       OCSPStatus `json:"status"`
+	StatusText   string     `json:"status_text"`
+	ProducedAt   time.Time  `json:"produced_at,omitempty"`
+	ThisUpdate   time.Time  `json:"this_update,omitempty"`
+	NextUpdate   time.Time  `json:"next_update,omitempty"`
+	RevokedAt    time.Time  `json:"revoked_at,omitempty"`
+	RevokeReason string     `json:"revoke_reason,omitempty"`
+	ResponderURL string     `json:"responder_url,omitempty"`
+	Error        string     `json:"error,omitempty"`
 }
 
 // OCSPStatus represents the OCSP response status.

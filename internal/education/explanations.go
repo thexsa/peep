@@ -538,8 +538,8 @@ func CheckCRLWarnings(crl analyzer.CRLResult) []analyzer.Warning {
 			Title:    "CRL Fetch Failed",
 			Detail:   "Could not download or parse the CRL: " + crl.FetchError,
 			Why:      pick(crlFetchFailedSayings),
-			Explain:  "peep attempted to download the CRL from the certificate's CRL Distribution Point (CDP) but failed. Without the CRL, revocation status cannot be verified via this mechanism. The failure could be due to network issues, DNS resolution failure, the CRL endpoint being down, or the CRL file being malformed. Most browsers soft-fail in this scenario (proceed without CRL checking), but this leaves a gap in revocation coverage.",
-			Fix:      "Check the CRL Distribution Point URL in the certificate's extensions. Verify the URL is reachable: curl -I <CDP-URL>. If the URL is unreachable, the CA may be having an outage. If the cert has no CDP, the CA may use OCSP only — check with: peep docs ocsp",
+			Explain:  "peep attempted to download the CRL from the certificate's CRL Distribution Point (CDP) but failed. Without the CRL, revocation status cannot be verified via this mechanism. The failure could be due to network issues, DNS resolution failure, the CRL endpoint being down, or the CRL file being malformed. Most browsers soft-fail in this scenario (proceed without CRL checking), but this leaves a gap in revocation coverage. Critically, hard-fail clients — including Java applications (with CRL checking enabled), mTLS/mutual-TLS systems, and enterprise middleware (WebSphere, WildFly/JBoss, F5 BIG-IP) — will abort connections entirely if the CRL endpoint is unreachable. If your environment uses hard-fail revocation checking, a CRL fetch failure means a complete connection outage for all certificates issued by this CA.",
+			Fix:      "Check the CRL Distribution Point URL in the certificate's extensions. Verify the URL is reachable: curl -I <CDP-URL>. If the URL is unreachable, the CA may be having an outage. If the cert has no CDP, the CA may use OCSP only — check with: peep docs ocsp. See: peep docs crl",
 			DocRef:   "peep docs crl",
 		})
 	}

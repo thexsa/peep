@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"encoding/json"
 	"encoding/pem"
 	"fmt"
 	"net"
@@ -56,53 +55,55 @@ Examples:
   peep -P smtp server:2525      Force SMTP protocol on non-standard port
   peep --save example.com       Save all cert PEMs to files
   peep --save 0 example.com     Save just the leaf cert PEM
-  peep --raw example.com        Raw x509 output for each cert`,
+  peep --raw example.com        Raw x509 output for each cert
+  peep docs                     Browse the built-in TLS reference guide
+  peep docs --search java       Search docs for a keyword
+  peep docs --all               Show all docs at once (man-page style)
+  peep docs crl --json          Output a doc topic as JSON`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runPeep,
 }
 
 func init() {
 	// -P / --proto / --lens
-	rootCmd.PersistentFlags().StringVarP(&flagProto, "proto", "P", "", "Force protocol: tls, smtp, rdp, ldap, ftp (default: auto-detect)")
+	rootCmd.PersistentFlags().StringVarP(&flagProto, "proto", "P", "", "Force protocol: tls, smtp, rdp, ldap, ftp (alias: --lens)")
 	rootCmd.PersistentFlags().StringVar(&flagProto, "lens", "", "Force protocol (alias for --proto)")
 
 	// -t / --timeout / --blink
-	rootCmd.PersistentFlags().IntVarP(&flagTimeout, "timeout", "t", 5, "Connection timeout in seconds")
+	rootCmd.PersistentFlags().IntVarP(&flagTimeout, "timeout", "t", 5, "Connection timeout in seconds (alias: --blink)")
 	rootCmd.PersistentFlags().IntVar(&flagTimeout, "blink", 5, "Connection timeout in seconds (alias for --timeout)")
 
-	// -j / --json / --monocle
+	// -j / --json
 	rootCmd.PersistentFlags().BoolVarP(&flagJSON, "json", "j", false, "Output as JSON (for scripting)")
-	rootCmd.PersistentFlags().BoolVar(&flagJSON, "monocle", false, "Output as JSON (alias for --json)")
 
 	// -p / --plain-text / --shades
-	rootCmd.PersistentFlags().BoolVarP(&flagPlainText, "plain-text", "p", false, "Plain text output (no color, no emoji, easy to copy/paste)")
+	rootCmd.PersistentFlags().BoolVarP(&flagPlainText, "plain-text", "p", false, "Plain text output — no color, no emoji (alias: --shades)")
 	rootCmd.PersistentFlags().BoolVar(&flagPlainText, "shades", false, "Plain text output (alias for --plain-text)")
 
 	// -i / --insecure / --blindfold
-	rootCmd.PersistentFlags().BoolVarP(&flagInsecure, "insecure", "i", false, "Skip system trust store verification")
+	rootCmd.PersistentFlags().BoolVarP(&flagInsecure, "insecure", "i", false, "Skip system trust store verification (alias: --blindfold)")
 	rootCmd.PersistentFlags().BoolVar(&flagInsecure, "blindfold", false, "Skip trust store verification (alias for --insecure)")
 
 	// -v / --verbose / --stare (PEM certs + raw x509)
-	rootCmd.PersistentFlags().BoolVarP(&flagVerbose, "verbose", "v", false, "Show PEM encoded certs and raw x509 output")
+	rootCmd.PersistentFlags().BoolVarP(&flagVerbose, "verbose", "v", false, "Show PEM encoded certs and raw x509 output (alias: --stare)")
 	rootCmd.PersistentFlags().BoolVar(&flagVerbose, "stare", false, "Show PEM + raw x509 output (alias for --verbose)")
 
 	// -d / --details / --gaze (cert detail cards)
-	rootCmd.PersistentFlags().BoolVarP(&flagDetails, "details", "d", false, "Show detailed cert info cards")
+	rootCmd.PersistentFlags().BoolVarP(&flagDetails, "details", "d", false, "Show detailed cert info cards (alias: --gaze)")
 	rootCmd.PersistentFlags().BoolVar(&flagDetails, "gaze", false, "Show detailed cert info cards (alias for --details)")
 
 	// -e / --explain / --whytho
-	rootCmd.PersistentFlags().BoolVarP(&flagExplain, "explain", "e", false, "Explain each issue with fix recommendations and doc references")
+	rootCmd.PersistentFlags().BoolVarP(&flagExplain, "explain", "e", false, "Explain each issue with fix recommendations (alias: --whytho)")
 	rootCmd.PersistentFlags().BoolVar(&flagExplain, "whytho", false, "Explain issues with fixes (alias for --explain)")
 
 	// -s / --save / --polaroid (string: empty = all, or index number)
-	rootCmd.PersistentFlags().StringVarP(&flagSave, "save", "s", "", "Save cert PEM(s) to files. No value = full chain, or specify index (0, 1, 2...)")
+	rootCmd.PersistentFlags().StringVarP(&flagSave, "save", "s", "", "Save cert PEM(s) to files. No value = all, or specify index (alias: --polaroid)")
 	rootCmd.PersistentFlags().Lookup("save").NoOptDefVal = "all"
 	rootCmd.PersistentFlags().StringVar(&flagSave, "polaroid", "", "Save cert PEM(s) (alias for --save)")
 	rootCmd.PersistentFlags().Lookup("polaroid").NoOptDefVal = "all"
 
-	// -r / --raw / --ogle
+	// -r / --raw
 	rootCmd.PersistentFlags().BoolVarP(&flagRaw, "raw", "r", false, "Show raw x509 text output for each cert in the chain")
-	rootCmd.PersistentFlags().BoolVar(&flagRaw, "ogle", false, "Show raw x509 output (alias for --raw)")
 
 	// --internal-ca
 	rootCmd.PersistentFlags().BoolVar(&flagInternalCA, "internal-ca", false,
@@ -111,6 +112,11 @@ func init() {
 	// --ca-bundle
 	rootCmd.PersistentFlags().StringVar(&flagCABundle, "ca-bundle", "",
 		"Path to a CA certificate bundle (.pem, .crt, .cer, .der) — replaces system trust store")
+
+	// Hide themed aliases from help — they'll be mentioned in primary flag descriptions
+	for _, alias := range []string{"lens", "blink", "shades", "blindfold", "stare", "gaze", "whytho", "polaroid"} {
+		rootCmd.PersistentFlags().MarkHidden(alias)
+	}
 }
 
 // Execute runs the root command.
@@ -122,8 +128,10 @@ func Execute() error {
 
 	err := rootCmd.Execute()
 
-	// Print update notification after all output
-	printUpdateNotification(updateCh)
+	// Print update notification after all output (skip in JSON mode)
+	if !flagJSON {
+		printUpdateNotification(updateCh)
+	}
 
 	return err
 }
@@ -250,8 +258,13 @@ func runPeep(cmd *cobra.Command, args []string) error {
 		Proto:   flagProto,
 	})
 	if err != nil {
-		fmt.Println(ui.Theme.ErrorStyle.Render(fmt.Sprintf("\n[FAIL] Failed to connect: %s", err)))
-		fmt.Println(ui.Theme.MutedStyle.Render("       Maybe try checking if the server is actually running? Just a thought."))
+		if flagJSON {
+			fmt.Printf(`{"error": %q}`, err.Error())
+			fmt.Println()
+		} else {
+			fmt.Println(ui.Theme.ErrorStyle.Render(fmt.Sprintf("\n[FAIL] Failed to connect: %s", err)))
+			fmt.Println(ui.Theme.MutedStyle.Render("       Maybe try checking if the server is actually running? Just a thought."))
+		}
 		return nil
 	}
 
@@ -482,6 +495,8 @@ func renderJSON(report *analyzer.DiagnosticReport) error {
 		}
 		warnings = stripped
 	}
+	// Sanitize all warning string fields for clean JSON output
+	warnings = sanitizeWarnings(warnings)
 
 	out := jsonReport{
 		Target:         report.Target,
@@ -495,7 +510,7 @@ func renderJSON(report *analyzer.DiagnosticReport) error {
 		Timestamp:      report.Timestamp,
 	}
 
-	data, err := json.MarshalIndent(out, "", "  ")
+	data, err := marshalCleanJSON(out)
 	if err != nil {
 		return fmt.Errorf("failed to marshal JSON: %w", err)
 	}

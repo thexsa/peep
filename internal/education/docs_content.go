@@ -557,7 +557,100 @@ PROTOCOLS THAT USE IMPLICIT TLS (no STARTTLS needed):
   like peep that handles it automatically.
 
 💡 peep auto-detects STARTTLS protocols by port number, or you can
-  force it with: peep --proto smtp server:587
+   force it with: peep --proto smtp server:587
+
+──────────────────────────────────────────────────────
+📡 SMTP STARTTLS — WIRE-LEVEL SEQUENCE
+──────────────────────────────────────────────────────
+
+  Here's exactly what happens on the wire when STARTTLS upgrades
+  an SMTP connection to TLS:
+
+  Client                              Server
+    │                                    │
+    │──── TCP SYN ──────────────────────>│  1. TCP handshake
+    │<─── TCP SYN-ACK ──────────────────│
+    │──── TCP ACK ──────────────────────>│
+    │                                    │
+    │<─── 220 mail.example.com ESMTP ───│  2. Plaintext SMTP greeting
+    │                                    │
+    │──── EHLO client.example.com ─────>│  3. Client identifies itself
+    │                                    │
+    │<─── 250-mail.example.com ─────────│  4. Server capabilities
+    │     250-SIZE 35882577              │
+    │     250-STARTTLS            ←──────│  ✅ Server advertises STARTTLS
+    │     250 HELP                       │
+    │                                    │
+    │──── STARTTLS ────────────────────>│  5. Client requests upgrade
+    │                                    │
+    │<─── 220 Ready to start TLS ───────│  6. Server agrees
+    │                                    │
+    │──── [TLS ClientHello] ───────────>│  7. Standard TLS handshake
+    │<─── [TLS ServerHello + Cert] ─────│     begins (see: peep docs
+    │     ... handshake continues ...    │     tls-handshake)
+    │                                    │
+    │═══════ ENCRYPTED SMTP ═══════════│  8. EHLO again over TLS 🔒
+
+  ⚠️  Steps 1-6 are ALL in plaintext. Anyone watching the network can
+     see the EHLO, the server capabilities, and the STARTTLS command.
+
+──────────────────────────────────────────────────────
+🗡️  STARTTLS STRIPPING ATTACK
+──────────────────────────────────────────────────────
+
+  Because the STARTTLS negotiation happens in plaintext, a man-in-the-
+  middle (MITM) attacker can tamper with it:
+
+  1. Attacker intercepts the server's capability response
+  2. Attacker removes the "250-STARTTLS" line
+  3. Client thinks server doesn't support TLS
+  4. Client continues in plaintext → attacker reads everything
+
+  This is called a "STARTTLS stripping" attack, and it's trivially
+  easy on any network where the attacker controls the path (e.g.,
+  public Wi-Fi, compromised router, nation-state censorship).
+
+  Defenses:
+    • MTA-STS (RFC 8461): policy that says "always require TLS for
+      this domain" — prevents downgrade
+    • DANE/TLSA (RFC 7672): DNS-based cert pinning via DNSSEC
+    • Implicit TLS (see below): skip STARTTLS entirely
+
+──────────────────────────────────────────────────────
+🔒 IMPLICIT TLS — THE MODERN BEST PRACTICE
+──────────────────────────────────────────────────────
+
+  RFC 8314 (2018) recommends implicit TLS on port 465 for email
+  submission instead of STARTTLS on port 587:
+
+  Port   Protocol       TLS Model        Status
+  ─────  ─────────────  ───────────────  ──────────────────────────
+  25     SMTP relay     STARTTLS         Still used for MTA-to-MTA
+  587    SMTP submit    STARTTLS         Legacy (but still common)
+  465    SMTP submit    Implicit TLS     ✅ Recommended (RFC 8314)
+
+  With implicit TLS, the TLS handshake begins IMMEDIATELY after the
+  TCP connection — no plaintext phase, no STARTTLS command, no
+  stripping vulnerability. It's the same model as HTTPS on port 443.
+
+──────────────────────────────────────────────────────
+📂 OTHER PROTOCOLS USING STARTTLS
+──────────────────────────────────────────────────────
+
+  LDAP STARTTLS:
+    • Port 389 (plaintext LDAP) → STARTTLS upgrade
+    • Uses LDAP Extended Operation OID 1.3.6.1.4.1.1466.20037
+    • Client sends ExtendedRequest with this OID
+    • Server responds with ExtendedResponse (resultCode: success)
+    • TLS handshake begins
+    • Alternative: use LDAPS on port 636 (implicit TLS)
+
+  FTP AUTH TLS (RFC 4217):
+    • Port 21 (FTP control channel) → AUTH TLS command
+    • Server responds with 234 (AUTH command OK, TLS negotiation follows)
+    • TLS handshake begins on the control channel
+    • Data channel encryption requires PROT P (Protected) command
+    • Alternative: SFTP (SSH-based, port 22) — completely different protocol
 `,
 	}
 }
@@ -600,7 +693,94 @@ This is why:
     on top of TLS.
 
 💡 peep automatically handles the X.224 negotiation when it sees
-  port 3389. No special flags needed.
+   port 3389. No special flags needed.
+
+──────────────────────────────────────────────────────
+📡 RDP — WIRE-LEVEL HANDSHAKE SEQUENCE
+──────────────────────────────────────────────────────
+
+  RDP's pre-TLS negotiation uses binary protocols (TPKT/X.224/T.125),
+  NOT text-based commands like STARTTLS. Here's the full sequence:
+
+  Client                              Server
+    │                                    │
+    │──── TCP SYN ──────────────────────>│  1. TCP handshake
+    │<─── TCP SYN-ACK ──────────────────│
+    │──── TCP ACK ──────────────────────>│
+    │                                    │
+    │──── TPKT + X.224 CR (with ────────>│  2. X.224 Connection Request
+    │     requestedProtocols =           │     Binary packet, NOT text
+    │     PROTOCOL_SSL | PROTOCOL_HYBRID)│     Client says "I want TLS"
+    │                                    │
+    │<─── TPKT + X.224 CC (with ────────│  3. X.224 Connection Confirm
+    │     selectedProtocol =             │     Server agrees to TLS
+    │     PROTOCOL_SSL)                  │     (or PROTOCOL_HYBRID for NLA)
+    │                                    │
+    │──── [TLS ClientHello] ───────────>│  4. Standard TLS handshake
+    │<─── [TLS ServerHello + Cert] ─────│     begins (see: peep docs
+    │     ... handshake continues ...    │     tls-handshake)
+    │                                    │
+    │═══════ ENCRYPTED RDP ════════════│  5. RDP session over TLS 🔒
+
+  ⚠️  This is NOT STARTTLS — RDP uses its own binary X.224/T.125
+     protocol for negotiation. You can't telnet to port 3389 and type
+     commands. This is why generic TLS tools can't inspect RDP certs.
+
+──────────────────────────────────────────────────────
+🔐 NLA — NETWORK LEVEL AUTHENTICATION
+──────────────────────────────────────────────────────
+
+  When NLA is enabled (the default in modern Windows), the flow uses
+  PROTOCOL_HYBRID instead of PROTOCOL_SSL:
+
+    PROTOCOL_HYBRID = TLS + CredSSP (Credential Security Support Provider)
+
+  With NLA:
+    1. TLS handshake completes first (encrypts the channel)
+    2. CredSSP runs OVER TLS to authenticate the user (NTLM or Kerberos)
+    3. User credentials are verified BEFORE the RDP session starts
+    4. If auth fails, the connection drops — no desktop is shown
+
+  Without NLA (legacy mode):
+    1. TLS handshake completes
+    2. Full RDP session starts (desktop rendered)
+    3. Windows login screen appears over the RDP session
+    4. User enters credentials
+
+  NLA is more secure because it prevents unauthenticated users from
+  consuming server resources (no desktop rendering until authenticated).
+
+  ⚠️  NLA requires TLS — if TLS negotiation fails, NLA can't work.
+     This means RDP cert issues ALSO break NLA authentication.
+
+──────────────────────────────────────────────────────
+🤷 WHY RDP CERTS ARE OFTEN SELF-SIGNED
+──────────────────────────────────────────────────────
+
+  By default, Windows generates a self-signed certificate for RDP.
+  Here's why this is so common:
+
+  1. Auto-generated: when Remote Desktop is enabled, Windows creates
+     a self-signed cert automatically. No admin action needed.
+  2. Internal use: RDP is typically used on internal networks where
+     public CA certs aren't required or practical.
+  3. Hostname mismatch: internal servers often have names like
+     "SRV-APP-01.corp.local" — public CAs won't issue certs for
+     non-public domains (.local, .internal, .corp).
+  4. Cost / effort: historically, getting a cert for every internal
+     server was expensive and operationally painful.
+  5. No browser UI: RDP clients show a warning dialog that users
+     dismiss ("Do you trust this computer?") — there's no padlock
+     icon or address bar to signal trust level.
+
+  Best practice for enterprise RDP:
+    • Deploy certs from your internal CA via Group Policy
+    • Use the "Remote Desktop Session Host Certificate" template
+    • Configure via: gpedit → Computer Config → Admin Templates →
+      Windows Components → Remote Desktop Services → Security →
+      "Server authentication certificate template"
+    • This eliminates the self-signed cert warning for domain-joined
+      machines that trust your internal CA
 `,
 	}
 }
@@ -682,6 +862,185 @@ When something's wrong with TLS, here's your checklist:
 
 💡 PRO TIP: Use -v for detailed cert info, or -vv for PEM encoded certs:
    peep -v <host>
+
+──────────────────────────────────────────────────────
+☕ JAVA / WEBSPHERE
+──────────────────────────────────────────────────────
+
+  Common errors and fixes:
+
+  ❌ "PKIX path building failed"
+    Cause: The CA chain (intermediate + root) is not in Java's truststore.
+    Fix: Import the CA chain into the JVM's cacerts file:
+      keytool -importcert -alias myca -file intermediate.crt \
+        -keystore $JAVA_HOME/lib/security/cacerts -storepass changeit
+
+  ❌ Keystore vs Truststore confusion
+    • Keystore (-Djavax.net.ssl.keyStore): holds YOUR cert + private key
+      (used when the server or client needs to present its own identity)
+    • Truststore (-Djavax.net.ssl.trustStore): holds CA certs you TRUST
+      (used to verify the other side's certificate)
+    • Default truststore: $JAVA_HOME/lib/security/cacerts
+
+  🔍 Debug TLS in Java:
+    -Djavax.net.debug=ssl,handshake
+    (produces verbose handshake logs — look for "found trusted certificate")
+
+  CRL checking in Java:
+    -Dcom.sun.security.enableCRLDP=true
+    -Dcom.sun.net.ssl.checkRevocation=true
+
+  ⚠️  Gotcha: you MUST restart the JVM after truststore changes.
+     Hot-reloading truststores is not supported by default.
+
+  WebSphere-specific:
+    • SSL repertoire configuration in admin console
+    • Node agent truststores vs DMGR truststores — both need the CA
+    • "CWPKI0022E" → missing CA cert in the repertoire's truststore
+
+──────────────────────────────────────────────────────
+🪶 APACHE httpd / mod_ssl
+──────────────────────────────────────────────────────
+
+  ❌ SSLCertificateChainFile deprecated
+    As of Apache 2.4.8, SSLCertificateChainFile is deprecated.
+    Fix: Concatenate leaf + intermediates into a single PEM file and
+    use SSLCertificateFile for the bundle:
+      cat leaf.crt intermediate.crt > bundle.crt
+    ⚠️  Cert order matters: leaf FIRST, then intermediate(s).
+
+  Recommended TLS configuration:
+    SSLProtocol             all -SSLv3 -TLSv1 -TLSv1.1
+    SSLCipherSuite          ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384
+    SSLHonorCipherOrder     on
+    SSLCompression          off
+
+  💡 Test with: peep <host>:443 after changes.
+
+──────────────────────────────────────────────────────
+🟢 NGINX
+──────────────────────────────────────────────────────
+
+  ❌ "SSL: error:... certificate verify failed" from clients
+    Cause: ssl_certificate does not include the full chain.
+    Fix: Concatenate leaf + intermediates into one file:
+      cat leaf.crt intermediate.crt > fullchain.crt
+    Then: ssl_certificate /path/to/fullchain.crt;
+
+  Recommended TLS configuration:
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers on;
+    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384;
+
+  ⚠️  Common mistake: separate cert and chain files without concatenation.
+     nginx's ssl_certificate must be a single file with the full chain.
+     ssl_certificate_key is ONLY for the private key.
+
+──────────────────────────────────────────────────────
+🔵 F5 BIG-IP LTM
+──────────────────────────────────────────────────────
+
+  ❌ Cert/key not assigned or profile not applied
+    • Client SSL profile: presents the server's cert to incoming clients
+    • Server SSL profile: validates backend server certs (BIG-IP as client)
+    • Both must be assigned to the Virtual Server (VS)
+    • A cert/key pair can exist in the system but still not be applied
+
+  Cipher group configuration:
+    • Use cipher groups (not cipher strings) in 14.x+
+    • Assign cipher group to the SSL profile, not individual ciphers
+    • tmsh: list ltm cipher group <name> to verify
+
+  🔍 Debug:
+    tcpdump -nni 0.0:nnnp -s0 -w /var/tmp/capture.pcap host <client-ip>
+    ssldump -ADNd -i /var/tmp/capture.pcap
+
+──────────────────────────────────────────────────────
+🟩 NODE.js
+──────────────────────────────────────────────────────
+
+  ❌ "DEPTH_ZERO_SELF_SIGNED_CERT"
+    Cause: connecting to a server with a self-signed cert.
+    Fix: pass the CA cert via tls.createSecureContext() or the
+    https.Agent ca option:
+      const agent = new https.Agent({ ca: fs.readFileSync('ca.crt') });
+
+  ❌ "UNABLE_TO_VERIFY_LEAF_SIGNATURE"
+    Cause: the server is missing intermediate certificates.
+    Fix: fix the SERVER's chain (install intermediates), not the client.
+
+  🚫 NODE_TLS_REJECT_UNAUTHORIZED=0 is NOT a fix.
+     It disables ALL certificate verification — hostname, expiry, chain,
+     revocation. It's the "rm -rf" of TLS debugging. Never use in prod.
+
+  💡 Don't override Node.js cipher defaults — they're already good.
+     If you must customize, use tls.DEFAULT_CIPHERS as a starting point.
+
+──────────────────────────────────────────────────────
+☸️  KUBERNETES / OPENSHIFT
+──────────────────────────────────────────────────────
+
+  ❌ Ingress TLS secret must contain the full chain
+    The tls.crt field in a TLS secret must include leaf + intermediates:
+      cat leaf.crt intermediate.crt > fullchain.crt
+      kubectl create secret tls my-tls --cert=fullchain.crt --key=tls.key
+    ⚠️  kubectl create secret tls does NOT concatenate for you.
+
+  OpenShift Routes:
+    spec.tls.certificate must include intermediates.
+    spec.tls.caCertificate is for the CA cert (for re-encrypt routes).
+
+  Cert-manager:
+    • certificate.spec.isCA: true is for CA certs only — do NOT set this
+      on leaf/server certificates
+    • Check Certificate and CertificateRequest resources for errors:
+      kubectl describe certificate <name>
+
+  ⚠️  Gotcha: renewed cert in secret but pods not restarted.
+     Many ingress controllers and sidecars (Envoy, nginx) don't auto-
+     reload when the secret changes. Restart pods or use reloader:
+       kubectl rollout restart deployment/<name>
+
+──────────────────────────────────────────────────────
+🟠 HAPROXY
+──────────────────────────────────────────────────────
+
+  PEM bundle for bind: key + leaf + intermediates in one file:
+    cat server.key leaf.crt intermediate.crt > haproxy-bundle.pem
+    bind *:443 ssl crt /path/to/haproxy-bundle.pem
+
+  Recommended TLS settings:
+    ssl-default-bind-ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256
+    ssl-default-bind-options ssl-min-ver TLSv1.2 no-tls-tickets
+
+  ⚠️  Don't include the root CA in the PEM bundle — it's unnecessary
+     and can confuse some clients.
+
+──────────────────────────────────────────────────────
+⚠️  GENERAL GOTCHAS
+──────────────────────────────────────────────────────
+
+  • Certificate order: always leaf first, then intermediate(s).
+    Wrong order causes "unable to verify" errors in strict clients.
+
+  • Expired intermediates: the intermediate cert can expire before
+    the leaf cert. This breaks the chain even though the leaf is valid.
+    Fix: check ALL certs in the chain with: peep chain <host>
+
+  • Clock skew: if the server or client clock is wrong, certs appear
+    "not yet valid" or "expired." Check with: date; ntpstat
+
+  • SNI misconfiguration: multi-domain servers must serve the right
+    cert based on the requested hostname (SNI). If SNI is missing or
+    the server ignores it, clients get the wrong (default) cert.
+    Test with: peep <host> (peep sends SNI by default)
+
+  • HSTS + cert renewal failure = locked out users.
+    If HSTS (Strict-Transport-Security) is enabled and your cert
+    expires or is replaced with an untrusted cert, browsers will
+    REFUSE to connect — no "proceed anyway" option. You're locked out
+    until the cert is fixed or the HSTS max-age expires.
+    💡 Start with short HSTS max-age values during initial deployment.
 `,
 	}
 }
@@ -820,6 +1179,105 @@ parties know to reject it.
 
   💡 Modern best practice: OCSP Stapling + CRL as fallback.
      See also: peep docs ocsp
+
+──────────────────────────────────────────────────────
+🛡️  HARD-FAIL vs SOFT-FAIL REVOCATION CHECKING
+──────────────────────────────────────────────────────
+
+  When a client can't reach the CRL endpoint (or OCSP responder), it
+  has two options:
+
+  Mode         Behavior                     Default in
+  ───────────  ─────────────────────────    ──────────────────────────
+  Soft-fail    Assume cert is valid,        Browsers (Chrome, Safari,
+               proceed with connection      Edge), most HTTP clients
+  Hard-fail    Require definitive "not      Java apps, mTLS systems,
+               revoked" or abort            enterprise middleware
+
+  Why do browsers use soft-fail?
+    • Performance: CRL/OCSP checks add latency to every connection
+    • Privacy: live OCSP queries leak browsing history to the CA
+    • Availability: if a CA's CRL/OCSP endpoint goes down under
+      hard-fail, every site using that CA becomes unreachable
+
+  Browser-specific approaches:
+    • Chrome: uses CRLSets (pre-distributed compressed revocation
+      data, similar to CRLite) + OCSP stapling. Does NOT query OCSP
+      responders directly. No soft-fail because there's no query.
+    • Firefox: uses CRLite (pre-distributed bloom filter of ALL
+      revoked certs). Hard-fail locally, no network dependency.
+    • Safari/Edge: soft-fail OCSP with short timeouts.
+
+  ⚠️  Soft-fail is vulnerable: an attacker who compromises a cert's
+     private key can ALSO block the client's CRL/OCSP requests (e.g.,
+     by MITMing the network). The client soft-fails and accepts the
+     revoked cert. This is the fundamental weakness of soft-fail.
+
+  Chromium enterprise policy:
+    RequireOnlineRevocationChecksForLocalAnchors forces hard-fail
+    for certificates chained to private/enterprise CAs. This is
+    useful for corporate environments where you control the CA and
+    can guarantee OCSP/CRL availability.
+
+──────────────────────────────────────────────────────
+🏢 WHO ENFORCES HARD-FAIL?
+──────────────────────────────────────────────────────
+
+  Many non-browser clients default to hard-fail, or can be configured
+  for it. If you run any of these, CRL availability is critical:
+
+  Platform / Client                How to enable / notes
+  ───────────────────────────────  ──────────────────────────────────
+  Java (JSSE)                      -Dcom.sun.security.enableCRLDP=true
+                                   -Dcom.sun.net.ssl.checkRevocation=true
+                                   -Djava.security.debug=certpath
+  WebSphere / Liberty              SSL repertoire → CRL/OCSP config
+  WildFly / JBoss (Elytron)        trust-manager → certificate-
+                                   revocation-lists attribute
+  mTLS / mutual TLS systems        Both sides check revocation;
+                                   client cert CRL failures abort
+  F5 BIG-IP (Server SSL)           Server SSL profile → CRL checking
+                                   with "authenticate" set to "require"
+  Palo Alto (SSL decryption)       CRL/OCSP checking for forward
+                                   proxy and inbound inspection
+  Cisco ASA / Firepower            CRL checking on RAVPN and S2S
+                                   VPN certificate validation
+  Government / FedRAMP             NIST 800-52 recommends hard-fail
+                                   for revocation checking
+  PCI-DSS / HIPAA environments     Often mandated by compliance policy
+  Internal PKI deployments         Custom TLS clients often default
+                                   to hard-fail for internal CAs
+  Custom TLS clients (Go, Rust)    Depends on implementation; many
+                                   security-focused clients hard-fail
+
+──────────────────────────────────────────────────────
+✅ BEST PRACTICES
+──────────────────────────────────────────────────────
+
+  If you control the CA (private/enterprise PKI):
+    • Use hard-fail — you can guarantee CRL/OCSP availability
+    • Deploy highly-available OCSP responders (load-balanced, geo-
+      distributed) and CRL endpoints (CDN-backed)
+    • Monitor CRL/OCSP infrastructure — if it goes down under
+      hard-fail, ALL connections to certs issued by that CA will fail
+    • Set aggressive CRL refresh intervals (1–6 hours)
+
+  For public CAs (DigiCert, Let's Encrypt, Sectigo, etc.):
+    • Rely on OCSP stapling — configure your server to staple
+    • Consider OCSP Must-Staple (RFC 7633) on your certs for
+      guaranteed revocation enforcement without client-side queries
+    • Use short-lived certificates (90 days or less) to reduce the
+      window of exposure if revocation fails
+    • Don't depend on CRL/OCSP endpoint availability — you don't
+      control the CA's infrastructure
+
+  Universal advice:
+    • Monitor your CRL Distribution Point and OCSP responder URLs
+      with uptime monitoring (Pingdom, UptimeRobot, etc.)
+    • If running hard-fail: test failover — simulate CRL/OCSP
+      endpoint outages and verify your clients handle it correctly
+    • Keep CRL sizes manageable — large CRLs (10+ MB) cause timeout
+      issues. Use partitioned CRLs or OCSP for high-volume CAs
 `,
 	}
 }
