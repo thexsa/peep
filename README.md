@@ -1,6 +1,16 @@
 # 👀 peep — TLS diagnostics in plain English
 
+[![Latest Release](https://img.shields.io/github/v/release/thexsa/peep?style=flat-square)](https://github.com/thexsa/peep/releases/latest)
+[![Build](https://img.shields.io/github/actions/workflow/status/thexsa/peep/ci.yml?branch=main&style=flat-square&label=build)](https://github.com/thexsa/peep/actions)
+[![Go Version](https://img.shields.io/github/go-mod/go-version/thexsa/peep?style=flat-square)](https://go.dev/)
+[![License](https://img.shields.io/github/license/thexsa/peep?style=flat-square)](LICENSE)
+[![Downloads](https://img.shields.io/github/downloads/thexsa/peep/total?style=flat-square)](https://github.com/thexsa/peep/releases)
+[![Homebrew](https://img.shields.io/badge/homebrew-thexsa%2Ftap%2Fpeep-FBB040?style=flat-square&logo=homebrew)](https://github.com/thexsa/homebrew-tap)
+
 peep is a TLS diagnostic tool for support engineers, SREs, platform folks, and anyone who is tired of pretending hex dumps are a personality. It peeps into TLS handshakes & certificate chains, & tells you what's broken in plain English, instead of cryptographic cave paintings — because _"PKIX path building failed"_ was not helpful.
+
+<!-- TODO: Add demo GIF here after recording with VHS -->
+<!-- ![peep demo](demo.gif) -->
 
 ```
 $ peep self-signed.badssl.com
@@ -38,6 +48,119 @@ $ peep self-signed.badssl.com
 ┃  [FAIL] Trust store verification failed
 ┃         x509: certificate signed by unknown authority
 ┃         Trust store says no. Browsers say no. I say no. Everybody says no.
+```
+
+---
+
+## Why peep?
+
+Because `openssl s_client` was designed for cryptographers, not for the person at 2 AM trying to figure out why the load balancer is returning the wrong cert.
+
+| The Problem | peep |
+|-------------|------|
+| `openssl s_client -connect host:443 -servername host < /dev/null 2>/dev/null \| openssl x509 -noout -text` | `peep host` |
+| "PKIX path building failed" | "Missing intermediate cert — the server needs to send it" |
+| "unable to get local issuer certificate" | "Chain verification failed — here's exactly which cert is wrong and why" |
+| SMTP STARTTLS: add `-starttls smtp` and pray | `peep mail.company.com:587` |
+| RDP certs: ❌ openssl can't even | `peep rdp-server:3389` just works |
+| Manually checking OCSP, CRL, CT, ciphers separately | `peep scan host` checks everything in one shot |
+| "It works in Chrome" (because Chrome does AIA chasing) | peep shows what `curl`, Go, Java, and Python actually see |
+| Output designed for robots | Output designed for humans (with `--json` for the robots too) |
+| No fix recommendations | `peep --explain host` tells you exactly what to do |
+
+**Zero dependencies. Zero telemetry. Single binary. Runs locally.**
+
+---
+
+## Try These
+
+After installing, try these against [badssl.com](https://badssl.com) to see peep in action:
+
+```bash
+# Self-signed cert — watch peep roast it
+peep self-signed.badssl.com
+
+# Expired cert — see exactly when it died
+peep expired.badssl.com
+
+# Wrong hostname — SNI mismatch
+peep wrong.host.badssl.com
+
+# Missing intermediate — the "works in Chrome but breaks everywhere else" problem
+peep incomplete-chain.badssl.com
+
+# Get explanations and fix recommendations for every finding
+peep incomplete-chain.badssl.com --explain
+
+# Full deep scan — ciphers, OCSP, CRL, CT logs, TLS version probing
+peep scan google.com
+
+# SMTP with STARTTLS
+peep smtp.gmail.com:587
+
+# See graduated examples for any command (simple → advanced → JSON + jq)
+peep --examples
+peep scan --examples
+```
+
+---
+
+## Installation
+
+### Homebrew (macOS / Linux)
+
+```bash
+brew install thexsa/tap/peep
+```
+
+### Quick Install (macOS / Linux)
+
+```bash
+curl -sSfL https://raw.githubusercontent.com/thexsa/peep/main/install.sh | sh
+```
+
+Detects your OS and architecture, downloads the latest release, verifies the SHA-256 checksum, and asks where you'd like to install.
+
+### Go Install
+
+```bash
+go install github.com/thexsa/peep/cmd/peep@latest
+```
+
+Requires Go 1.23+.
+
+### Download a Binary
+
+Grab the latest binary for your platform from the [Releases](https://github.com/thexsa/peep/releases) page:
+
+| Platform | Binary |
+|----------|--------|
+| macOS (Apple Silicon) | `peep-darwin-arm64` |
+| macOS (Intel) | `peep-darwin-amd64` |
+| Linux (x86_64) | `peep-linux-amd64` |
+| Linux (ARM64) | `peep-linux-arm64` |
+| Linux (ppc64le) | `peep-linux-ppc64le` |
+| AIX (ppc64) | `peep-aix-ppc64` |
+| Windows (x86_64) | `peep-windows-amd64.exe` |
+
+```bash
+# Download, make executable, add to PATH (example for macOS ARM)
+curl -LO https://github.com/thexsa/peep/releases/latest/download/peep-darwin-arm64
+chmod +x peep-darwin-arm64
+sudo mv peep-darwin-arm64 /usr/local/bin/peep
+```
+
+**Windows:** Download `peep-windows-amd64.exe`, rename to `peep.exe`, and place in a directory in your `%PATH%`.
+
+### Build from Source
+
+Requires **Go 1.23+**. No CGO, no OpenSSL, no external dependencies.
+
+```bash
+git clone https://github.com/thexsa/peep.git
+cd peep
+make build       # Build for your platform → ./peep
+make build-all   # Cross-compile all 7 platforms → dist/
 ```
 
 ---
@@ -122,14 +245,7 @@ The deep scan checks CRL revocation by fetching the Certificate Revocation List 
 
 **LDAP distribution points** (common with Microsoft AD CS) are automatically detected and skipped — peep will try HTTP endpoints instead and provide the `ldapsearch` command for manual verification from a domain-joined machine.
 
-**TLS endpoint warnings**: If the CRL endpoint has a certificate error (e.g., hostname mismatch), peep still fetches and verifies the CRL data (it's signed by the CA, so transport-layer TLS isn't required for integrity), but warns you. This matters for environments with **hard-fail CRL policies**, where clients abort the TLS handshake if revocation status cannot be verified:
-
-- **Java applications** (`-Dcom.sun.security.enableCRLDP=true` + hard-fail revocation checking)
-- **mTLS/Zero Trust systems** (Istio, SPIFFE, mutual TLS gateways)
-- **Custom TLS clients** (Go `crypto/tls` with `VerifyPeerCertificate`, Python `ssl` with CRL checking)
-- **Financial/healthcare systems** (PCI-DSS, HIPAA environments with mandatory revocation checking)
-- **Government/military PKI** (DoD PKI, Common Access Card infrastructure)
-- **Hardware Security Modules (HSMs)** and embedded systems with strict CRL enforcement
+**TLS endpoint warnings**: If the CRL endpoint has a certificate error (e.g., hostname mismatch), peep still fetches and verifies the CRL data (it's signed by the CA, so transport-layer TLS isn't required for integrity), but warns you.
 
 ### 🌶️ Sarcastic Commentary
 Every finding comes with rotating sarcastic remarks. Because debugging TLS should at least be entertaining.
@@ -147,84 +263,6 @@ peep update --check      # Just check, don't install
 ```
 
 Disable automatic checks: set `PEEP_NO_UPDATE_CHECK=1` in your environment.
-
----
-
-## Installation
-
-### Option 1: Homebrew (macOS / Linux)
-
-```bash
-brew install thexsa/tap/peep
-```
-
-To update later:
-```bash
-brew update && brew upgrade peep
-```
-
-### Option 2: Download a binary
-
-Grab the latest binary for your platform from the [Releases](https://github.com/thexsa/peep/releases) page.
-
-| Platform | Binary |
-|----------|--------|
-| macOS (Apple Silicon) | `peep-darwin-arm64` |
-| macOS (Intel) | `peep-darwin-amd64` |
-| Linux (x86_64) | `peep-linux-amd64` |
-| Linux (ARM64) | `peep-linux-arm64` |
-| Linux (ppc64le) | `peep-linux-ppc64le` |
-| AIX (ppc64) | `peep-aix-ppc64` |
-| Windows (x86_64) | `peep-windows-amd64.exe` |
-
-#### Make it executable and add to your PATH
-
-**macOS / Linux:**
-```bash
-# Download (example for macOS ARM)
-curl -LO https://github.com/thexsa/peep/releases/latest/download/peep-darwin-arm64
-
-# Make it executable
-chmod +x peep-darwin-arm64
-
-# Move to a directory in your PATH
-sudo mv peep-darwin-arm64 /usr/local/bin/peep
-
-# Verify
-peep --help
-```
-
-**Windows:**
-
-Download `peep-windows-amd64.exe`, rename it to `peep.exe`, and place it in a directory that's in your `%PATH%` (e.g., `C:\Users\<you>\bin`).
-
-### Option 3: Build from source
-
-Requires **Go 1.23+**. No CGO, no OpenSSL, no external dependencies.
-
-```bash
-git clone https://github.com/thexsa/peep.git
-cd peep
-
-# Build for your current platform
-make build
-
-# The binary is at ./peep — run it directly:
-./peep google.com
-
-# Or move it to your PATH:
-sudo mv peep /usr/local/bin/peep
-```
-
-#### Cross-compile for all platforms
-```bash
-make build-all
-# Outputs to dist/:
-#   dist/peep-darwin-arm64
-#   dist/peep-linux-amd64
-#   dist/peep-linux-ppc64le
-#   dist/peep-windows-amd64.exe
-```
 
 ---
 
@@ -258,7 +296,6 @@ peep --save example.com
 
 # Save a specific cert by chain index (0=leaf, 1=intermediate, etc.)
 peep --save=0 example.com
-peep --save=2 example.com
 
 # SMTP (auto-detects STARTTLS)
 peep mail.example.com:587
@@ -327,8 +364,7 @@ Every flag has a standard name and a fun themed alias. Use whichever speaks to y
 | `peep update --check` | Check for updates without installing (alias: `--sniff`) |
 | `peep update --force` | Force update even if already on latest version |
 | `peep version` | Show version, install method, and platform |
-
-Port is always specified in the host argument: `host:port` (default: 443)
+| `peep completion --install` | Install shell tab-completion (zsh, bash, fish, PowerShell) |
 
 ### Flag Combinations
 Flags work in any order and combine freely:
@@ -375,6 +411,20 @@ peep scan mail.corp.local --ca-bundle /path/to/corp-root-ca.pem
 # Combine with --internal-ca for proper grading
 peep scan mail.corp.local --ca-bundle /path/to/corp-root-ca.crt --internal-ca
 ```
+
+---
+
+## Privacy & Telemetry
+
+**peep does not collect telemetry, analytics, or usage data.**
+
+The only outbound network requests peep makes are:
+
+1. **TLS connections** to the host you're scanning (that's the whole point)
+2. **OCSP/CRL checks** to the CA's responder (in `scan` mode only, to verify revocation status)
+3. **Update checks** to the GitHub Releases API (once every 24 hours, disabled with `PEEP_NO_UPDATE_CHECK=1`)
+
+No hostnames, certificates, scan results, or any other data is sent anywhere. Ever. peep is a local tool that runs on your machine and talks only to the hosts you point it at.
 
 ---
 
@@ -447,10 +497,18 @@ peep completion powershell   # print to stdout
 
 - **100% Go** — no CGO, no OpenSSL, no external runtime dependencies
 - **Single binary** — download and run, nothing to install
-- **Cross-platform** — macOS (ARM), Linux (amd64, ppc64le), Windows (amd64)
+- **Cross-platform** — macOS (ARM + Intel), Linux (amd64, arm64, ppc64le), AIX (ppc64), Windows (amd64)
 - **CLI framework** — [spf13/cobra](https://github.com/spf13/cobra) (Apache 2.0)
 - **Terminal styling** — [charmbracelet/lipgloss](https://github.com/charmbracelet/lipgloss) (MIT)
 - **Terminal width** — [golang.org/x/term](https://pkg.go.dev/golang.org/x/term) (BSD-3-Clause)
+
+---
+
+## Contributing
+
+Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, project structure, and PR guidelines.
+
+Please read our [Code of Conduct](CODE_OF_CONDUCT.md) before contributing.
 
 ---
 
