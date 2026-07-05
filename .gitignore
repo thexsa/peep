@@ -31,3 +31,6 @@ debug
 # Environment
 .env
 .env.*
+demo.tape
+demo.gif
+*.gif
