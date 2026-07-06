@@ -16,7 +16,7 @@ import (
 func AnalyzeCert(cert *x509.Certificate, depth int, totalCerts int, targetHost string) CertAnalysis {
 	analysis := CertAnalysis{
 		Depth:        depth,
-		Role:         determineRole(cert, depth, totalCerts),
+		Role:         determineRole(cert, depth),
 		Subject:      cert.Subject.String(),
 		Issuer:       cert.Issuer.String(),
 		CommonName:   cert.Subject.CommonName,
@@ -89,21 +89,17 @@ func AnalyzeCert(cert *x509.Certificate, depth int, totalCerts int, targetHost s
 }
 
 // determineRole identifies a certificate's role in the chain.
-func determineRole(cert *x509.Certificate, depth int, totalCerts int) CertRole {
+func determineRole(cert *x509.Certificate, depth int) CertRole {
 	if depth == 0 {
 		return RoleLeaf
 	}
-	// If it's the last cert and it's self-signed, it's a root
-	if depth == totalCerts-1 && cert.Subject.String() == cert.Issuer.String() {
+	// A true root CA is self-signed (Subject == Issuer). Only classify
+	// as root if both conditions are met, regardless of chain position.
+	if cert.Subject.String() == cert.Issuer.String() {
 		return RoleRoot
 	}
-	// If it's a CA cert but not the last, it's an intermediate
-	if cert.IsCA {
-		if depth == totalCerts-1 {
-			return RoleRoot
-		}
-		return RoleIntermediate
-	}
+	// Everything else above the leaf is an intermediate / issuing CA,
+	// even if it's the last cert the server sent.
 	return RoleIntermediate
 }
 
