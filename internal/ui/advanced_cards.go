@@ -410,15 +410,33 @@ var cipherRSAKexSayings = []string{
 
 // --- TLS version sass ---
 
-// tlsVersionSass returns a sarcastic annotation for deprecated TLS versions.
-func tlsVersionSass(version string) string {
+// tlsVersionSass returns a sarcastic annotation for TLS versions in the
+// cipher enumeration output. Provides commentary for both supported and
+// not-supported versions.
+func tlsVersionSass(version string, supported bool) string {
+	if !supported {
+		switch version {
+		case "SSLv3":
+			return PickSass(ssl30NotSupportedSayings)
+		case "TLSv1.0":
+			return PickSass(tls10NotSupportedSayings)
+		case "TLSv1.1":
+			return PickSass(tls11NotSupportedSayings)
+		default:
+			return ""
+		}
+	}
 	switch version {
-	case "TLS 1.0":
+	case "TLSv1.0":
 		return PickSass(tls10Sayings)
-	case "TLS 1.1":
+	case "TLSv1.1":
 		return PickSass(tls11Sayings)
-	case "SSL 3.0":
+	case "SSLv3":
 		return PickSass(ssl30Sayings)
+	case "TLSv1.2":
+		return PickSass(tls12Sayings)
+	case "TLSv1.3":
+		return PickSass(tls13Sayings)
 	default:
 		return ""
 	}
@@ -429,6 +447,14 @@ var tls10Sayings = []string{
 	"← PCI DSS banned this in 2018. You're late.",
 	"← every major browser dropped TLS 1.0 support. Take the hint.",
 	"← this version is old enough to vote.",
+	"← RFC 8996 says this is dead. Who are you arguing with?",
+	"← BEAST, Lucky13, and friends all live here. It's a party you don't want to attend.",
+	"← congratulations, you're backward-compatible with 1999.",
+	"← supporting TLS 1.0 is like leaving the back door unlocked 'for convenience.'",
+	"← your compliance auditor just felt a disturbance in the Force.",
+	"← this protocol has been on life support longer than most sitcoms.",
+	"← if your users need TLS 1.0, they also need new devices.",
+	"← still here? This should've been disabled during the Obama administration.",
 }
 
 var tls11Sayings = []string{
@@ -436,6 +462,14 @@ var tls11Sayings = []string{
 	"← TLS 1.1: the version nobody remembers existed.",
 	"← deprecated in RFC 8996 (2021). Not even a controversial decision.",
 	"← the forgotten middle child of TLS versions.",
+	"← exists purely so people can say 'we support more than one version.'",
+	"← TLS 1.1 is the New Year's resolution of protocols — full of good intentions, ultimately abandoned.",
+	"← it fixed BEAST and then immediately became irrelevant.",
+	"← TLS 1.1: too broken to be modern, too new to be nostalgic.",
+	"← the protocol equivalent of a participation trophy.",
+	"← removed from every major browser by 2020. You're on borrowed time.",
+	"← literally nobody is negotiating this version on purpose.",
+	"← disable this and literally zero legitimate users will notice.",
 }
 
 var ssl30Sayings = []string{
@@ -443,6 +477,65 @@ var ssl30Sayings = []string{
 	"← SSL 3.0 in production is a compliance violation in most frameworks.",
 	"← this protocol is older than some of your coworkers.",
 	"← if you're still supporting SSL 3.0, we need to have a serious conversation.",
+	"← SSL 3.0 was designed when 'security' meant a padlock GIF on the page.",
+	"← this belongs in a museum, not a server config.",
+	"← Netscape Navigator called. Even it thinks you should upgrade.",
+	"← SSL 3.0 is the Windows XP of protocols. Beloved, ancient, full of holes.",
+	"← supporting this in production is like driving without a seatbelt. On the highway. Blindfolded.",
+	"← there are actual CVEs older than your junior developers targeting this protocol.",
+	"← RFC 7568 formally declared this dead in 2015. A DECADE ago.",
+	"← the 'S' in SSL 3.0 stands for 'Stop using this.'",
+}
+
+var tls12Sayings = []string{
+	"← the workhorse. Solid, if you've got the right ciphers backing it up.",
+	"← the Honda Civic of TLS. Not flashy, but it gets the job done.",
+	"← perfectly fine, provided you're not pairing it with garbage ciphers.",
+	"← the minimum acceptable version in the current decade.",
+	"← 1.3 is right there, but sure, 1.2 works.",
+	"← your compliance team can breathe. For now.",
+	"← acceptable. Like showing up to a party on time instead of early.",
+	"← still pulling its weight after all these years.",
+	"← TLS 1.2: technically modern. Emotionally mid.",
+	"← cipher suite selection matters more here than in 1.3. Choose wisely.",
+	"← the 'I voted' sticker of TLS versions. You did the bare minimum.",
+	"← solid choice. Not exciting, but your CISO won't yell at you.",
+}
+
+var tls13Sayings = []string{
+	"← the gold standard. Someone here reads RFCs.",
+	"← faster handshake, mandatory forward secrecy. Chef's kiss.",
+	"← this is the way. No notes.",
+	"← 0-RTT, AEAD-only ciphers, no legacy baggage. Beautiful.",
+	"← the only version where you can't accidentally pick a bad cipher.",
+	"← finally, a protocol designed by people who learned from 20 years of mistakes.",
+	"← TLS 1.3: where the cipher suite list is short because everything in it is good.",
+	"← approved by your security team, your compliance auditor, and your therapist.",
+	"← forward secrecy isn't optional here. That's not a bug, it's the point.",
+	"← if TLS versions were credit scores, this would be 850.",
+	"← RFC 8446 done right. Respect.",
+	"← the protocol equivalent of showing up in a tailored suit.",
+}
+
+var ssl30NotSupportedSayings = []string{
+	"← good. This should never see the light of day.",
+	"← correct. POODLE took care of this one.",
+	"← as it should be. SSL 3.0 belongs in a history textbook.",
+	"← one less nightmare to worry about.",
+}
+
+var tls10NotSupportedSayings = []string{
+	"← good. One less compliance finding to deal with.",
+	"← smart. Nothing of value was lost.",
+	"← correct. Let the dead protocols rest.",
+	"← whoever disabled this deserves a raise.",
+}
+
+var tls11NotSupportedSayings = []string{
+	"← good. Nobody was using it anyway.",
+	"← correct. Even TLS 1.1 wouldn't miss itself.",
+	"← as expected. The forgotten middle child stays forgotten.",
+	"← disabled and unbothered. As it should be.",
 }
 
 // --- OCSP / CRL / CT sass pools ---
@@ -528,14 +621,22 @@ func RenderCipherEnum(result analyzer.CipherEnumResult) string {
 	// TLS Version support
 	lines = append(lines, Theme.BoldStyle.Render("TLS Versions:"))
 	for _, v := range result.TLSVersions {
+		sass := tlsVersionSass(v.Version, v.Supported)
 		if !v.Supported {
-			lines = append(lines, fmt.Sprintf("  %-10s %s", v.Version, Theme.MutedStyle.Render("not supported")))
+			if sass != "" {
+				lines = append(lines, fmt.Sprintf("  %-10s %s  %s", v.Version, Theme.MutedStyle.Render("not supported"), Theme.MutedStyle.Render(sass)))
+			} else {
+				lines = append(lines, fmt.Sprintf("  %-10s %s", v.Version, Theme.MutedStyle.Render("not supported")))
+			}
 			continue
 		}
 		icon := StatusIcon(v.Grade)
-		sass := tlsVersionSass(v.Version)
 		if sass != "" {
-			lines = append(lines, fmt.Sprintf("  %-10s %s  %s", v.Version, icon, Theme.ErrorStyle.Render(sass)))
+			sassStyle := Theme.MutedStyle
+			if v.Grade == analyzer.WrittenInCrayon {
+				sassStyle = Theme.ErrorStyle
+			}
+			lines = append(lines, fmt.Sprintf("  %-10s %s  %s", v.Version, icon, sassStyle.Render(sass)))
 		} else {
 			lines = append(lines, fmt.Sprintf("  %-10s %s", v.Version, icon))
 		}

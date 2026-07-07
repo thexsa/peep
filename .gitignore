@@ -35,3 +35,4 @@ demo.tape
 demo.gif
 *.gif
 demo-record.sh
+dev.sh
