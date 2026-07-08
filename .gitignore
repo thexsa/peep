@@ -32,7 +32,7 @@ debug
 .env
 .env.*
 demo.tape
-demo.gif
 *.gif
+!demo.gif
 demo-record.sh
 dev.sh

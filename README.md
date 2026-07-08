@@ -9,46 +9,7 @@
 
 peep is a TLS diagnostic tool for support engineers, SREs, platform folks, and anyone who is tired of pretending hex dumps are a personality. It peeps into TLS handshakes & certificate chains, & tells you what's broken in plain English, instead of cryptographic cave paintings — because _"PKIX path building failed"_ was not helpful.
 
-<!-- TODO: Add demo GIF here after recording with VHS -->
-<!-- ![peep demo](demo.gif) -->
-
-```
-$ peep self-signed.badssl.com
-┃    Peeping at self-signed.badssl.com:443
-┃    IP: 104.154.89.105
-┃    Protocol: Direct TLS
-┃    Direct TLS handshake completed successfully
-┃
-┃    ⚠ SERVER DID NOT INCLUDE THE ISSUING CA IN ITS RESPONSE
-┃      One job. You had ONE job. Bundle the certs correctly. ONE. JOB.
-┃
-┃    Verdict: Appears to be Written in Crayon
-┃    If this cert were a building, it would've been condemned.
-┃
-┃    Findings: 3 issue(s) detected
-┃      [WARN] Self-Signed Certificate
-┃      [FAIL] No Issuing CA in Server Response
-┃      [FAIL] Chain Verification Failed
-┃
-┃    [PASS] TLS: TLSv1.2
-┃    [PASS] Cipher: TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
-┃  CHAIN OF TRUST
-┃
-┃  [WARN] Leaf *.badssl.com
-┃    Expires: 725 days (Apr 20, 2028)
-┃    Covers: *.badssl.com, badssl.com
-┃    Key: RSA
-┃    Serial: EC7256235A58C012
-┃    SHA-256: 3F2A:DC71:E756:...
-┃    Self-signed!
-┃
-┃  [FAIL] No Issuing CA in server response
-┃         The chain has exactly one link. That's not a chain. That's a pendant.
-┃
-┃  [FAIL] Trust store verification failed
-┃         x509: certificate signed by unknown authority
-┃         Trust store says no. Browsers say no. I say no. Everybody says no.
-```
+![peep demo](demo.gif)
 
 ---
 
