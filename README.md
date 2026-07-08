@@ -218,6 +218,7 @@ peep docs ciphers          # Cipher suites explained
 peep docs crl              # Certificate Revocation Lists
 peep docs ocsp             # OCSP — stapled vs live, Must-Staple
 peep docs aia              # AIA chasing & "works in Chrome" gotcha
+peep docs verdicts         # Browser vs Service/API grading system
 peep docs tls-handshake    # TLS 1.2 vs 1.3 handshake flows
 peep docs starttls         # What STARTTLS is
 peep docs rdp              # Why RDP certs are special
@@ -361,7 +362,7 @@ Every flag has a standard name and a fun themed alias. Use whichever speaks to y
 | `peep scan <host>` | Deep scan with cipher enumeration, OCSP, CRL, CT logs |
 | `peep docs [topic]` | Built-in TLS reference |
 | `peep update` | Update peep to the latest version (alias: `peep upgrade`) |
-| `peep update --check` | Check for updates without installing (alias: `--sniff`) |
+| `peep update --check` | Check for updates without installing |
 | `peep update --force` | Force update even if already on latest version |
 | `peep version` | Show version, install method, and platform |
 | `peep completion --install` | Install shell tab-completion (zsh, bash, fish, PowerShell) |
@@ -374,7 +375,6 @@ peep -d -j example.com                 # JSON with detailed cert info
 peep --whytho example.com              # CLI with issue explanations (themed alias)
 peep --shades --whytho example.com     # Copy/paste friendly with explanations
 peep --polaroid example.com            # Save all cert PEMs (themed alias)
-peep --ogle example.com                # Raw x509 output (themed alias)
 ```
 
 ---

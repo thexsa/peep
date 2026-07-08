@@ -59,6 +59,17 @@ type Warning struct {
 	DocRef   string       `json:"doc_ref,omitempty"`
 }
 
+// DualVerdict holds both browser-lenient and strict service/API verdicts.
+// Modern browsers (Chrome, Firefox, Safari) dynamically rebuild chains,
+// soft-fail on OCSP/CRL, and handle many misconfigurations gracefully.
+// Programmatic clients (Go crypto/tls, OpenSSL, Java) enforce strict
+// chain order, revocation checking, and reject aggressively.
+type DualVerdict struct {
+	BrowserVerdict HealthStatus `json:"browser_verdict"`
+	ServiceVerdict HealthStatus `json:"service_verdict"`
+	RootCauses     []string     `json:"root_causes,omitempty"` // warning codes that differ between verdicts
+}
+
 // TargetInfo holds information about the connection target.
 type TargetInfo struct {
 	Host       string `json:"host"`
@@ -196,6 +207,7 @@ type DiagnosticReport struct {
 	CAOrigin      *CAOriginResult   `json:"ca_origin,omitempty"`
 	Warnings      []Warning         `json:"warnings"`
 	OverallStatus HealthStatus      `json:"overall_status"`
+	Verdicts      DualVerdict       `json:"verdicts"`
 	ScanDuration  time.Duration     `json:"scan_duration_ms"`
 	Timestamp     time.Time         `json:"timestamp"`
 	InternalCAMode bool            `json:"internal_ca_mode,omitempty"`
@@ -214,6 +226,7 @@ type ScanReport struct {
 	CAOrigin       *CAOriginResult    `json:"ca_origin,omitempty"`
 	Warnings       []Warning          `json:"warnings,omitempty"`
 	OverallStatus  HealthStatus       `json:"overall_status"`
+	Verdicts       DualVerdict        `json:"verdicts"`
 	ScanDurationMs int64              `json:"scan_duration_ms"`
 	Timestamp      time.Time          `json:"timestamp"`
 }

@@ -34,6 +34,7 @@ Available topics:
   crl              Certificate Revocation Lists
   ocsp             Online Certificate Status Protocol
   aia              Authority Information Access
+  verdicts         Browser vs Service/API grading system
   starttls         What STARTTLS is
   rdp              Why RDP certs are special
   troubleshooting  Common issues & what to check

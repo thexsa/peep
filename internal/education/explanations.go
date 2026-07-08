@@ -8,6 +8,151 @@ import (
 	"github.com/thexsa/peep/internal/analyzer"
 )
 
+// isNetworkError returns true if the error string indicates a network-level
+// failure (timeout, connection refused, DNS, etc.) rather than a server-side
+// or data integrity issue. These failures may reflect the scanner's network
+// path rather than the server's TLS configuration.
+func isNetworkError(errStr string) bool {
+	lower := strings.ToLower(errStr)
+	patterns := []string{
+		"timeout",
+		"i/o timeout",
+		"connection refused",
+		"no such host",
+		"network is unreachable",
+		"no route to host",
+		"connection reset",
+		"dial tcp",
+		"dial udp",
+		"context deadline exceeded",
+		"tls handshake timeout",
+		"eof",
+		"connection timed out",
+	}
+	for _, p := range patterns {
+		if strings.Contains(lower, p) {
+			return true
+		}
+	}
+	return false
+}
+
+// BrowserSafeWarningCodes lists warning codes that modern browsers handle
+// gracefully. These warnings are suppressed (treated as MainCharacterEnergy)
+// when computing the Browser verdict, but remain at full severity for the
+// Service/API verdict.
+//
+// Modern browsers dynamically rebuild chains, soft-fail on OCSP/CRL,
+// and don't block on missing SCTs. Programmatic clients (Go crypto/tls,
+// OpenSSL, Java) enforce strict chain order, revocation, and reject aggressively.
+//
+// NOTE: CHAIN_MISSING_INTERMEDIATE is intentionally NOT browser-safe.
+// Chrome/Firefox attempt AIA fetching, but it's unreliable, adds latency,
+// and Safari doesn't always support it.
+var BrowserSafeWarningCodes = map[string]bool{
+	// Chain issues browsers auto-fix
+	"CHAIN_WRONG_ORDER":      true, // Browsers rebuild chain order dynamically
+	"CHAIN_UNNECESSARY_ROOT": true, // Browsers ignore extra root certs
+
+	// OCSP — browsers soft-fail by default
+	"OCSP_STAPLE_MISSING":  true, // Browsers do their own OCSP or skip it
+	"OCSP_STAPLE_STALE":    true, // Browsers soft-fail stale staples
+	"OCSP_UNKNOWN":         true, // Browsers soft-fail "unknown" responses
+	"OCSP_ERROR":           true, // Browsers soft-fail OCSP errors
+	"OCSP_NETWORK_ERROR":   true, // Already info — scanner network issue
+
+	// CRL — browsers use CRLite/CRLSets, don't fetch CRLs live
+	"CRL_STALE":         true,
+	"CRL_FETCH_FAILED":  true,
+	"CRL_NETWORK_ERROR": true, // Already info — scanner network issue
+
+	// CT — Chrome uses its own CT infra; missing SCTs alone don't block
+	"CT_NO_SCTS":    true,
+	"CT_PARSE_ERROR": true,
+
+	// Validity period — browsers warn but don't block on long validity
+	"CERT_LONG_VALIDITY": true,
+	"CERT_VALIDITY_PERIOD": true,
+}
+
+// PublicCAOnlyWarningCodes are warning codes that only apply to publicly-trusted CAs.
+// These are suppressed when the CA origin detection determines the CA is private/internal.
+// Private CAs don't submit to CT logs and aren't bound by CA/B Forum validity limits.
+var PublicCAOnlyWarningCodes = map[string]bool{
+	"CT_NO_SCTS":         true, // Private CAs don't participate in CT
+	"CT_PARSE_ERROR":     true, // SCTs are a public CA concept
+	"CERT_LONG_VALIDITY": true, // CA/B Forum 398-day limit is for public CAs only
+	"CERT_VALIDITY_PERIOD": true, // Same — internal certs commonly have longer validity
+}
+
+// SuppressPublicCAOnlyWarnings removes warnings that only apply to public CAs
+// from the warning list. Called after CA origin detection determines the CA
+// is private/internal (assessment is "very_likely_private_ca", "likely_private_ca",
+// or "possibly_private_ca").
+func SuppressPublicCAOnlyWarnings(warnings []analyzer.Warning) []analyzer.Warning {
+	filtered := make([]analyzer.Warning, 0, len(warnings))
+	for _, w := range warnings {
+		if PublicCAOnlyWarningCodes[w.Code] {
+			continue
+		}
+		filtered = append(filtered, w)
+	}
+	return filtered
+}
+
+// EvaluateDualVerdict computes both browser and service verdicts from a
+// base grade (worst of handshake + chain grades) and a warning list.
+// The service verdict is the strict worst-of-all. The browser verdict
+// skips browser-safe warning codes.
+func EvaluateDualVerdict(baseGrade analyzer.HealthStatus, warnings []analyzer.Warning) analyzer.DualVerdict {
+	serviceVerdict := EvaluateServiceVerdict(baseGrade, warnings)
+	browserVerdict := EvaluateBrowserVerdict(baseGrade, warnings)
+
+	var rootCauses []string
+	if browserVerdict != serviceVerdict {
+		// Collect the warning codes responsible for the divergence
+		for _, w := range warnings {
+			if BrowserSafeWarningCodes[w.Code] && w.Severity > browserVerdict {
+				// This warning was suppressed in browser but affects service
+				rootCauses = append(rootCauses, w.Code)
+			}
+		}
+	}
+
+	return analyzer.DualVerdict{
+		BrowserVerdict: browserVerdict,
+		ServiceVerdict: serviceVerdict,
+		RootCauses:     rootCauses,
+	}
+}
+
+// EvaluateServiceVerdict computes the strict verdict — worst grade wins
+// across all warnings, no exceptions. This is the current behavior.
+func EvaluateServiceVerdict(baseGrade analyzer.HealthStatus, warnings []analyzer.Warning) analyzer.HealthStatus {
+	status := baseGrade
+	for _, w := range warnings {
+		if w.Severity > status {
+			status = w.Severity
+		}
+	}
+	return status
+}
+
+// EvaluateBrowserVerdict computes the lenient verdict — browser-safe
+// warning codes are treated as informational (MainCharacterEnergy) and
+// don't drag down the overall browser compatibility verdict.
+func EvaluateBrowserVerdict(baseGrade analyzer.HealthStatus, warnings []analyzer.Warning) analyzer.HealthStatus {
+	status := baseGrade
+	for _, w := range warnings {
+		if BrowserSafeWarningCodes[w.Code] {
+			continue // Skip browser-safe warnings
+		}
+		if w.Severity > status {
+			status = w.Severity
+		}
+	}
+	return status
+}
 // BuildWarnings examines a diagnostic report and generates contextual warnings.
 // When internalCA is true, checks that only apply to publicly-trusted certificates
 // (like the 398-day validity cap) are skipped.
@@ -532,16 +677,30 @@ func CheckCRLWarnings(crl analyzer.CRLResult) []analyzer.Warning {
 	}
 
 	if crl.FetchError != "" {
-		w = append(w, analyzer.Warning{
-			Code:     "CRL_FETCH_FAILED",
-			Severity: analyzer.MallCopCredentials,
-			Title:    "CRL Fetch Failed",
-			Detail:   "Could not download or parse the CRL: " + crl.FetchError,
-			Why:      pick(crlFetchFailedSayings),
-			Explain:  "peep attempted to download the CRL from the certificate's CRL Distribution Point (CDP) but failed. Without the CRL, revocation status cannot be verified via this mechanism. The failure could be due to network issues, DNS resolution failure, the CRL endpoint being down, or the CRL file being malformed. Most browsers soft-fail in this scenario (proceed without CRL checking), but this leaves a gap in revocation coverage. Critically, hard-fail clients — including Java applications (with CRL checking enabled), mTLS/mutual-TLS systems, and enterprise middleware (WebSphere, WildFly/JBoss, F5 BIG-IP) — will abort connections entirely if the CRL endpoint is unreachable. If your environment uses hard-fail revocation checking, a CRL fetch failure means a complete connection outage for all certificates issued by this CA.",
-			Fix:      "Check the CRL Distribution Point URL in the certificate's extensions. Verify the URL is reachable: curl -I <CDP-URL>. If the URL is unreachable, the CA may be having an outage. If the cert has no CDP, the CA may use OCSP only — check with: peep docs ocsp. See: peep docs crl",
-			DocRef:   "peep docs crl",
-		})
+		if isNetworkError(crl.FetchError) {
+			// Network-level failure — don't penalize the server for the scanner's network path.
+			w = append(w, analyzer.Warning{
+				Code:     "CRL_NETWORK_ERROR",
+				Severity: analyzer.MainCharacterEnergy,
+				Title:    "CRL Fetch Failed (Network)",
+				Detail:   "Could not reach the CRL endpoint: " + crl.FetchError + ". This may reflect the scanner's network path rather than the server's TLS configuration.",
+				Why:      pick(crlNetworkErrorSayings),
+				Explain:  "peep attempted to download the CRL from the certificate's CRL Distribution Point (CDP) but failed due to a network-level issue (timeout, connection refused, DNS failure, etc.). This does not necessarily mean the CRL endpoint is down — it may be unreachable from the scanner's network (VPN, firewall, air-gapped environment). The server's actual clients may have no trouble reaching the CRL endpoint from their network.",
+				Fix:      "Verify the CRL endpoint is reachable from the server's perspective: curl -I <CDP-URL>. If you're scanning from a restricted network, the CRL endpoint may simply be unreachable from here.",
+				DocRef:   "peep docs crl",
+			})
+		} else {
+			w = append(w, analyzer.Warning{
+				Code:     "CRL_FETCH_FAILED",
+				Severity: analyzer.MallCopCredentials,
+				Title:    "CRL Fetch Failed",
+				Detail:   "Could not download or parse the CRL: " + crl.FetchError,
+				Why:      pick(crlFetchFailedSayings),
+				Explain:  "peep attempted to download the CRL from the certificate's CRL Distribution Point (CDP) but failed. Without the CRL, revocation status cannot be verified via this mechanism. The failure could be due to the CRL endpoint being down, or the CRL file being malformed. Most browsers soft-fail in this scenario (proceed without CRL checking), but this leaves a gap in revocation coverage. Critically, hard-fail clients — including Java applications (with CRL checking enabled), mTLS/mutual-TLS systems, and enterprise middleware (WebSphere, WildFly/JBoss, F5 BIG-IP) — will abort connections entirely if the CRL endpoint is unreachable. If your environment uses hard-fail revocation checking, a CRL fetch failure means a complete connection outage for all certificates issued by this CA.",
+				Fix:      "Check the CRL Distribution Point URL in the certificate's extensions. Verify the URL is reachable: curl -I <CDP-URL>. If the URL is unreachable, the CA may be having an outage. If the cert has no CDP, the CA may use OCSP only — check with: peep docs ocsp. See: peep docs crl",
+				DocRef:   "peep docs crl",
+			})
+		}
 	}
 
 	return w
@@ -567,29 +726,58 @@ func CheckOCSPStapleWarnings(staple analyzer.OCSPStapleResult) []analyzer.Warnin
 	}
 
 	if staple.IsStale {
-		w = append(w, analyzer.Warning{
-			Code:     "OCSP_STAPLE_STALE",
-			Severity: analyzer.MallCopCredentials,
-			Title:    "Stale OCSP Staple — NextUpdate Has Passed",
-			Detail:   "The stapled OCSP response's NextUpdate is in the past. The revocation data is outdated.",
-			Why:      pick(ocspStapleStaleSayings),
-			Explain:  "The server included an OCSP staple, but its NextUpdate timestamp has already passed. This means the stapled revocation proof is outdated. Strict clients may reject the connection because the staple is no longer considered valid. This typically happens when the server's OCSP stapling refresh mechanism is broken — the server fetched a staple once but never refreshed it. Some web servers (like nginx) cache OCSP responses and need to be configured to refresh them before they expire.",
-			Fix:      "Check your server's OCSP stapling configuration. In nginx: ssl_stapling on; ssl_stapling_verify on; and ensure the resolver directive is set. In Apache: SSLUseStapling on; SSLStaplingCache. Restart the server to force a fresh OCSP fetch. Verify the staple is fresh with: peep <host>",
-			DocRef:   "peep docs ocsp",
-		})
+		if staple.HasMustStaple {
+			// Must-Staple + stale staple = hard fail. Clients MUST reject.
+			w = append(w, analyzer.Warning{
+				Code:     "OCSP_STAPLE_STALE_MUST_STAPLE",
+				Severity: analyzer.WrittenInCrayon,
+				Title:    "Stale OCSP Staple on Must-Staple Certificate",
+				Detail:   "The stapled OCSP response is stale AND the certificate has the Must-Staple extension. Compliant clients will reject this connection.",
+				Why:      pick(ocspStapleStaleMustStapleSayings),
+				Explain:  "This certificate has the OCSP Must-Staple extension (RFC 7633, OID 1.3.6.1.5.5.7.1.24), which means compliant TLS clients MUST receive a valid, fresh OCSP staple — or reject the connection entirely. The staple is present but stale (NextUpdate has passed), so it no longer counts as valid. The result is the same as having no staple at all: connection rejection. The server's OCSP staple refresh mechanism is broken.",
+				Fix:      "Fix OCSP staple refresh immediately. In nginx: ensure ssl_stapling on; ssl_stapling_verify on; resolver 8.8.8.8 valid=300s; are set and the resolver is reachable. Restart nginx to force a fresh fetch. In Apache: verify SSLStaplingCache is configured and working. The staple must be refreshed before NextUpdate expires. Monitor OCSP staple freshness continuously — with Must-Staple enabled, a stale staple is an outage.",
+				DocRef:   "peep docs ocsp",
+			})
+		} else {
+			w = append(w, analyzer.Warning{
+				Code:     "OCSP_STAPLE_STALE",
+				Severity: analyzer.MallCopCredentials,
+				Title:    "Stale OCSP Staple — NextUpdate Has Passed",
+				Detail:   "The stapled OCSP response's NextUpdate is in the past. The revocation data is outdated.",
+				Why:      pick(ocspStapleStaleSayings),
+				Explain:  "The server included an OCSP staple, but its NextUpdate timestamp has already passed. This means the stapled revocation proof is outdated. Strict clients may reject the connection because the staple is no longer considered valid. This typically happens when the server's OCSP stapling refresh mechanism is broken — the server fetched a staple once but never refreshed it. Some web servers (like nginx) cache OCSP responses and need to be configured to refresh them before they expire.",
+				Fix:      "Check your server's OCSP stapling configuration. In nginx: ssl_stapling on; ssl_stapling_verify on; and ensure the resolver directive is set. In Apache: SSLUseStapling on; SSLStaplingCache. Restart the server to force a fresh OCSP fetch. Verify the staple is fresh with: peep <host>",
+				DocRef:   "peep docs ocsp",
+			})
+		}
 	}
 
 	if !staple.Present {
-		w = append(w, analyzer.Warning{
-			Code:     "OCSP_STAPLE_MISSING",
-			Severity: analyzer.MallCopCredentials,
-			Title:    "No OCSP Staple Present",
-			Detail:   "The server did not include a stapled OCSP response in the TLS handshake.",
-			Why:      pick(ocspStapleMissingSayings),
-			Explain:  "OCSP stapling allows the server to include a pre-fetched, CA-signed revocation status proof in the TLS handshake. Without it, clients must either (a) query the CA's OCSP responder directly — leaking which sites the user visits to the CA and adding latency, or (b) skip revocation checking entirely (soft-fail). OCSP stapling is the privacy-respecting, performance-friendly approach and is recommended for all TLS servers. If the cert has the Must-Staple extension and the staple is missing, clients MUST reject the connection.",
-			Fix:      "Enable OCSP stapling on your server. In nginx: ssl_stapling on; ssl_stapling_verify on; resolver 8.8.8.8 valid=300s;. In Apache: SSLUseStapling on; SSLStaplingCache shmcb:/tmp/stapling_cache(128000). In HAProxy: bind ... ssl crt /path/to/cert.pem ... (HAProxy staples automatically). After enabling, verify with: peep <host>",
-			DocRef:   "peep docs ocsp",
-		})
+		if staple.HasMustStaple {
+			// Must-Staple + no staple = hard fail. Clients MUST reject.
+			w = append(w, analyzer.Warning{
+				Code:     "OCSP_STAPLE_MISSING_MUST_STAPLE",
+				Severity: analyzer.WrittenInCrayon,
+				Title:    "Missing OCSP Staple on Must-Staple Certificate",
+				Detail:   "The certificate has the Must-Staple extension but the server did not staple an OCSP response. Compliant clients will reject this connection.",
+				Why:      pick(ocspStapleMissingMustStapleSayings),
+				Explain:  "This certificate has the OCSP Must-Staple extension (RFC 7633, OID 1.3.6.1.5.5.7.1.24), which tells TLS clients: 'If you don't get a fresh OCSP staple in the handshake, reject the connection.' The server did not include an OCSP staple, so compliant clients (including Chrome, Firefox, and Safari) will refuse to connect. This is an outage-level misconfiguration — the cert explicitly opted into strict revocation checking but the server isn't delivering.",
+				Fix:      "Enable OCSP stapling immediately. In nginx: ssl_stapling on; ssl_stapling_verify on; resolver 8.8.8.8 valid=300s;. In Apache: SSLUseStapling on; SSLStaplingCache shmcb:/tmp/stapling_cache(128000). If OCSP stapling cannot be enabled reliably, consider reissuing the certificate WITHOUT the Must-Staple extension until your stapling infrastructure is stable.",
+				DocRef:   "peep docs ocsp",
+			})
+		} else {
+			// No Must-Staple — missing staple is informational only.
+			w = append(w, analyzer.Warning{
+				Code:     "OCSP_STAPLE_MISSING",
+				Severity: analyzer.MainCharacterEnergy,
+				Title:    "No OCSP Staple Present",
+				Detail:   "The server did not include a stapled OCSP response in the TLS handshake. No Must-Staple extension is present, so this is informational.",
+				Why:      pick(ocspStapleMissingSayings),
+				Explain:  "OCSP stapling allows the server to include a pre-fetched, CA-signed revocation status proof in the TLS handshake. Without it, clients must either (a) query the CA's OCSP responder directly — leaking which sites the user visits to the CA and adding latency, or (b) skip revocation checking entirely (soft-fail). OCSP stapling is the privacy-respecting, performance-friendly approach and is recommended for all TLS servers. Since this certificate does not have the Must-Staple extension, clients will still connect — but enabling stapling is a best practice.",
+				Fix:      "Enable OCSP stapling on your server. In nginx: ssl_stapling on; ssl_stapling_verify on; resolver 8.8.8.8 valid=300s;. In Apache: SSLUseStapling on; SSLStaplingCache shmcb:/tmp/stapling_cache(128000). In HAProxy: bind ... ssl crt /path/to/cert.pem ... (HAProxy staples automatically). After enabling, verify with: peep <host>",
+				DocRef:   "peep docs ocsp",
+			})
+		}
 	}
 
 	return w
@@ -620,14 +808,20 @@ var crlStaleSayings = []string{
 }
 
 var crlFetchFailedSayings = []string{
-	"Couldn't fetch the CRL. The revocation data is a mystery wrapped in a timeout.",
-	"CRL download failed. Is the CDP URL even reachable? Did anyone check?",
-	"The CRL endpoint ghosted us. No response. No data. No revocation status.",
+	"CRL download failed. The endpoint responded, but the data was unusable.",
 	"Failed to fetch the CRL. Without it, we can't tell if this cert was revoked.",
-	"CRL? What CRL? The endpoint didn't respond. Revocation status: ¯\\_(ツ)_/¯",
-	"The CRL Distribution Point is unreachable. Soft-fail it is, apparently.",
-	"Couldn't download the CRL. Either the CA's endpoint is down or the URL is wrong.",
-	"CRL fetch failed. We're basically trusting this cert on vibes alone now.",
+	"The CRL endpoint returned something, but it wasn't a valid CRL. Helpful.",
+	"Couldn't parse the CRL. Either the endpoint is broken or the data is corrupt.",
+	"CRL fetch failed. The endpoint is up but the response isn't a CRL we can use.",
+}
+
+var crlNetworkErrorSayings = []string{
+	"Couldn't reach the CRL endpoint from here. Might be our network, not theirs.",
+	"CRL endpoint unreachable. Could be a firewall, could be DNS. Don't blame the server yet.",
+	"Network error fetching CRL. The server's clients may have no trouble from their vantage point.",
+	"CRL timeout. Before flagging the server, check if you're behind a restrictive network.",
+	"Couldn't download the CRL — but that might say more about our network path than the CA's endpoint.",
+	"CRL fetch timed out. This is informational — it may just be our connectivity.",
 }
 
 // --- OCSP Staple Saying Pools ---
@@ -661,8 +855,28 @@ var ocspStapleMissingSayings = []string{
 	"OCSP stapling is disabled. It's free, it's fast, it's private. Why isn't it on?",
 	"No OCSP staple present. The server is making every client do the revocation homework.",
 	"Missing OCSP staple. The server said 'checking revocation is YOUR problem now.'",
-	"No staple. If the cert has Must-Staple enabled, this is a connection killer.",
+	"No Must-Staple, no staple. Not a deal-breaker, but stapling is always a good idea.",
 	"OCSP staple? Absent. Privacy for your users? Also absent. Enable stapling.",
+}
+
+var ocspStapleMissingMustStapleSayings = []string{
+	"Must-Staple is on. No staple is present. Every compliant browser is bouncing.",
+	"The cert said 'you MUST staple.' The server said 'nah.' Clients said 'goodbye.'",
+	"Must-Staple + no staple = guaranteed connection failures. This is an outage.",
+	"RFC 7633 is very clear: Must-Staple means MUST. The server is in violation.",
+	"The cert opted into strict revocation. The server didn't deliver. Game over.",
+	"Must-Staple without a staple is like requiring a badge and then not checking IDs.",
+	"Chrome, Firefox, Safari — all rejecting this connection right now. Must-Staple demands a staple.",
+	"The certificate literally says 'staple or die.' The server chose death.",
+}
+
+var ocspStapleStaleMustStapleSayings = []string{
+	"Must-Staple cert with a stale staple. Compliant clients will reject this.",
+	"The staple expired but Must-Staple is still enforced. This is an active outage.",
+	"Stale staple + Must-Staple = the server is serving expired proof. Clients bail.",
+	"Must-Staple says 'fresh staple required.' The server's staple is past its expiry. Connection rejected.",
+	"The OCSP staple is stale and the cert demands a valid one. This is a hard fail.",
+	"Must-Staple + expired staple refresh = connection failures in production. Fix this now.",
 }
 
 // --- CT/SCT Warning Check ---
@@ -792,16 +1006,30 @@ func CheckOCSPLiveWarnings(ocsp analyzer.OCSPResult) []analyzer.Warning {
 		})
 	case analyzer.OCSPError:
 		if ocsp.Error != "" {
-			w = append(w, analyzer.Warning{
-				Code:     "OCSP_ERROR",
-				Severity: analyzer.MallCopCredentials,
-				Title:    "OCSP Check Failed",
-				Detail:   "Could not complete OCSP revocation check: " + ocsp.Error,
-				Why:      pick(ocspLiveErrorSayings),
-				Explain:  "The live OCSP check failed — we couldn't get a definitive answer on whether this certificate is revoked. This could be a network issue, a timeout, or a problem with the CA's OCSP responder. Clients with soft-fail OCSP policies (the default in most browsers) will silently ignore this failure and trust the cert anyway. Clients with hard-fail policies will reject the connection.",
-				Fix:      "Check if the OCSP responder URL is reachable: curl -v <OCSP URL>. If it's a timeout, the CA's OCSP infrastructure may be slow or down. If the URL is wrong, check the AIA extension in the certificate.",
-				DocRef:   "peep docs ocsp",
-			})
+			if isNetworkError(ocsp.Error) {
+				// Network-level failure — don't penalize the server for the scanner's network path.
+				w = append(w, analyzer.Warning{
+					Code:     "OCSP_NETWORK_ERROR",
+					Severity: analyzer.MainCharacterEnergy,
+					Title:    "OCSP Check Failed (Network)",
+					Detail:   "Could not reach the OCSP responder: " + ocsp.Error + ". This may reflect the scanner's network path rather than the server's TLS configuration.",
+					Why:      pick(ocspLiveNetworkErrorSayings),
+					Explain:  "The live OCSP check failed due to a network-level issue (timeout, connection refused, DNS failure, etc.). This does not necessarily indicate a problem with the server's TLS configuration — it may reflect the scanner's network path, firewall rules, or transient connectivity issues. The server's actual clients may be able to reach the OCSP responder just fine from their network.",
+					Fix:      "Verify the OCSP responder is reachable from the server's perspective: curl -v <OCSP URL>. If you're scanning from a restricted network (VPN, corporate firewall, air-gapped), the OCSP endpoint may simply be unreachable from here.",
+					DocRef:   "peep docs ocsp",
+				})
+			} else {
+				w = append(w, analyzer.Warning{
+					Code:     "OCSP_ERROR",
+					Severity: analyzer.MallCopCredentials,
+					Title:    "OCSP Check Failed",
+					Detail:   "Could not complete OCSP revocation check: " + ocsp.Error,
+					Why:      pick(ocspLiveErrorSayings),
+					Explain:  "The live OCSP check failed — we couldn't get a definitive answer on whether this certificate is revoked. This could be a problem with the CA's OCSP responder or a malformed response. Clients with soft-fail OCSP policies (the default in most browsers) will silently ignore this failure and trust the cert anyway. Clients with hard-fail policies will reject the connection.",
+					Fix:      "Check if the OCSP responder URL is reachable: curl -v <OCSP URL>. If it's a timeout, the CA's OCSP infrastructure may be slow or down. If the URL is wrong, check the AIA extension in the certificate.",
+					DocRef:   "peep docs ocsp",
+				})
+			}
 		}
 	}
 
@@ -827,10 +1055,19 @@ var ocspLiveUnknownSayings = []string{
 
 var ocspLiveErrorSayings = []string{
 	"OCSP check failed. We tried to verify revocation and the universe said 'no.'",
-	"Couldn't reach the OCSP responder. Revocation status: a complete mystery.",
-	"OCSP error. The CA's responder is either down, slow, or just not in the mood.",
+	"OCSP error. The CA's responder returned something unexpected.",
 	"Failed to query OCSP. Soft-fail clients will shrug. Hard-fail clients will bail.",
-	"The OCSP responder didn't respond. Ironic, isn't it?",
+	"The OCSP responder responded, but not in a way we can parse. Helpful.",
+	"OCSP check failed — the responder said something, but it wasn't useful.",
+}
+
+var ocspLiveNetworkErrorSayings = []string{
+	"Couldn't reach the OCSP responder from here. This might be a scanner-side network issue.",
+	"OCSP responder unreachable. Could be our network, could be theirs. Don't panic yet.",
+	"Network error reaching OCSP. The server's actual clients may have no problem.",
+	"The OCSP responder didn't respond — but that might say more about our network than theirs.",
+	"OCSP timeout. Before panicking, check if you're behind a firewall that blocks OCSP.",
+	"Couldn't reach the OCSP endpoint. This is informational — it may just be our vantage point.",
 }
 
 // --- Cipher Enumeration Warning Check ---

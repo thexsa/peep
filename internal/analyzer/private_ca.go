@@ -64,13 +64,40 @@ func DetectCAOrigin(chain ChainAnalysis, leaf *x509.Certificate, hasEmbeddedSCTs
 		return result
 	}
 
-	// Factor 1: Trust store validation (-80 or +50)
+	// Factor 1: Trust store validation
+	// Key insight: the system trust store on macOS/Windows can contain
+	// enterprise-pushed internal root CAs (via MDM/GPO). So chain validation
+	// alone does NOT mean the CA is public. We must check if the trusted root
+	// matches a known public CA brand.
 	if chain.TrustStoreVerified {
-		result.Evidence = append(result.Evidence, CAOriginEvidence{
-			Factor: "Trust Store",
-			Points: -80,
-			Detail: fmt.Sprintf("Chain validates to public trust store (root: %s)", chain.TrustedRootName),
-		})
+		rootLower := strings.ToLower(chain.TrustedRootName)
+		isKnownPublicCA := false
+		for _, brand := range publicCABrands {
+			if strings.Contains(rootLower, brand) {
+				isKnownPublicCA = true
+				break
+			}
+		}
+
+		if isKnownPublicCA {
+			// Root is a recognized public CA — strong signal this is NOT private
+			result.Evidence = append(result.Evidence, CAOriginEvidence{
+				Factor: "Trust Store",
+				Points: -80,
+				Detail: fmt.Sprintf("Chain validates to known public CA root (%s)", chain.TrustedRootName),
+			})
+		} else {
+			// Chain validates against the system store, but the root is not a
+			// recognized public CA. This is common for enterprise environments
+			// where internal CAs are pushed into the system trust store via MDM.
+			// Neutral score — validation is expected for both public and properly
+			// deployed internal CAs.
+			result.Evidence = append(result.Evidence, CAOriginEvidence{
+				Factor: "Trust Store",
+				Points: 0,
+				Detail: fmt.Sprintf("Chain validates to system trust store, but root is not a recognized public CA (%s)", chain.TrustedRootName),
+			})
+		}
 	} else if !chain.HasMissingIntermediate && !chain.LeafOnlyMissingIntermediate &&
 		chain.VerificationError != "" && !strings.Contains(chain.VerificationError, "incomplete chain") {
 		result.Evidence = append(result.Evidence, CAOriginEvidence{
@@ -124,12 +151,12 @@ func DetectCAOrigin(chain ChainAnalysis, leaf *x509.Certificate, hasEmbeddedSCTs
 		result.Score += e.Points
 	}
 
-	// Determine assessment based on score alone.
-	// TrustStoreVerified already contributes -80 points — that's enough to
-	// pull a genuine public CA below threshold. But when an internal root CA
-	// has been manually installed into the system store (common in enterprise),
-	// the positive evidence (LDAP URIs, internal keywords, private IPs, etc.)
-	// will still push the score above threshold despite the -80 penalty.
+	// Determine assessment based on score.
+	// Known public CA roots get -80 points. Unknown roots in the system store
+	// get 0 (enterprise roots pushed via MDM validate but aren't public).
+	// Internal signals (LDAP URIs, internal keywords, private IPs, no SCTs)
+	// push the score positive. Public signals (public branding + CAB OIDs)
+	// push the score negative.
 	switch {
 	case result.Score >= 80:
 		result.Assessment = "very_likely_private_ca"

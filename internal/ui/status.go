@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/thexsa/peep/internal/analyzer"
 )
@@ -69,14 +70,71 @@ func RandomExpiredComment() string {
 	return PickSass(expiredSayings)
 }
 
-// RenderOverallStatus renders the overall scan status.
+// RenderOverallStatus renders the overall scan status (legacy single-verdict).
+// Use RenderDualVerdict for the new dual-scale output.
 func RenderOverallStatus(status analyzer.HealthStatus) string {
-	badge := StatusBadge(status)
-	saying := RandomSaying(status)
+	return RenderDualVerdict(analyzer.DualVerdict{
+		BrowserVerdict: status,
+		ServiceVerdict: status,
+	})
+}
 
-	header := Theme.BoldStyle.Render("VERDICT")
-	content := fmt.Sprintf("%s\n  %s\n  %s", header, badge, Theme.MutedStyle.Render(saying))
-	return "\n" + Theme.SectionStyle.Render(content) + "\n"
+// RenderDualVerdict renders the dual-scale verdict block.
+// When both verdicts match, it shows a clean single verdict.
+// When they differ, it shows both with root cause codes and a sarcastic quip.
+// Special case: when the ONLY issue is CHAIN_UNNECESSARY_ROOT, it shows
+// "Unnecessary Main Character Arc" — a unique verdict for this specific scenario.
+func RenderDualVerdict(v analyzer.DualVerdict) string {
+	var lines []string
+
+	header := Theme.BoldStyle.Render("VERDICTS")
+	lines = append(lines, header)
+	lines = append(lines, "")
+
+	// Special case: the ONLY issue is the unnecessary root cert
+	if isUnnecessaryRootOnly(v) {
+		badge := Theme.WarningStyle.Render("⚡ Unnecessary Main Character Arc")
+		lines = append(lines, fmt.Sprintf("  %s", badge))
+		lines = append(lines, fmt.Sprintf("  %s", Theme.MutedStyle.Render(PickSass(unnecessaryRootSayings))))
+	} else if v.BrowserVerdict == v.ServiceVerdict {
+		// Same verdict — clean single line
+		lines = append(lines, fmt.Sprintf("  %s", StatusBadge(v.ServiceVerdict)))
+		lines = append(lines, fmt.Sprintf("  %s", Theme.MutedStyle.Render(RandomSaying(v.ServiceVerdict))))
+	} else {
+		// Different verdicts — show both
+		lines = append(lines, fmt.Sprintf("  🌐 Browser:      %s", StatusBadge(v.BrowserVerdict)))
+		lines = append(lines, fmt.Sprintf("  🤖 Service/API:  %s", StatusBadge(v.ServiceVerdict)))
+
+		// Root cause codes
+		if len(v.RootCauses) > 0 {
+			lines = append(lines, "")
+			for _, code := range v.RootCauses {
+				lines = append(lines, fmt.Sprintf("     👉 %s", Theme.MutedStyle.Render(code)))
+			}
+		}
+
+		// Sarcastic quip about the divergence
+		lines = append(lines, "")
+		if v.BrowserVerdict == analyzer.MainCharacterEnergy && v.ServiceVerdict == analyzer.MallCopCredentials {
+			lines = append(lines, fmt.Sprintf("  %s", Theme.MutedStyle.Render(PickSass(browserPassServiceWarnSayings))))
+		} else if v.BrowserVerdict == analyzer.MainCharacterEnergy && v.ServiceVerdict == analyzer.WrittenInCrayon {
+			lines = append(lines, fmt.Sprintf("  %s", Theme.MutedStyle.Render(PickSass(browserPassServiceFailSayings))))
+		} else if v.BrowserVerdict == analyzer.MallCopCredentials && v.ServiceVerdict == analyzer.WrittenInCrayon {
+			lines = append(lines, fmt.Sprintf("  %s", Theme.MutedStyle.Render(PickSass(browserWarnServiceFailSayings))))
+		}
+	}
+
+	return "\n" + Theme.SectionStyle.Render(fmt.Sprintf("%s", strings.Join(lines, "\n"))) + "\n"
+}
+
+// isUnnecessaryRootOnly returns true when the ONLY divergence between browser
+// and service verdicts is CHAIN_UNNECESSARY_ROOT — the server sent the root CA
+// cert in the chain (harmless but wasteful).
+func isUnnecessaryRootOnly(v analyzer.DualVerdict) bool {
+	return v.BrowserVerdict == analyzer.MainCharacterEnergy &&
+		v.ServiceVerdict == analyzer.MallCopCredentials &&
+		len(v.RootCauses) == 1 &&
+		v.RootCauses[0] == "CHAIN_UNNECESSARY_ROOT"
 }
 
 // --- Saying pools (10-20 each) ---
@@ -198,4 +256,43 @@ var scanDurationSayings = []string{
 	"Faster than filing a Jira ticket about it.",
 	"We just did what 3 engineers and a wiki page couldn't.",
 	"That's the entire chain, verified, explained, and judged. In milliseconds.",
+}
+
+// --- Dual-verdict divergence saying pools ---
+
+var browserPassServiceWarnSayings = []string{
+	"Browsers will connect just fine. Your Go microservice? Not so much.",
+	"Chrome doesn't care. Your API gateway does. Fix the warnings.",
+	"Users won't notice. Your monitoring dashboard will.",
+	"Browsers are forgiving. curl with strict TLS? Less so.",
+	"Works in every browser. Fails the code review for your service mesh.",
+	"Your users are fine. Your SRE team has questions.",
+	"Modern browsers auto-heal this. Java HttpsURLConnection? Throws an exception.",
+	"Browser compatibility: A+. API reliability: C-. Pick your audience.",
+	"Chrome rebuilt your broken chain for you. OpenSSL won't be so kind.",
+	"Browsers have seen worse. Programmatic clients have standards.",
+}
+
+var browserPassServiceFailSayings = []string{
+	"Browsers will connect. Every API client will reject this outright.",
+	"Chrome can handle this mess. Go's crypto/tls will hard-fail.",
+	"Your website works. Your API is a dumpster fire. Priorities.",
+	"Users browse fine. Services fail hard. The duality of bad TLS.",
+	"Technically browsable. Programmatically catastrophic.",
+	"Browsers forgive a lot. Production services forgive nothing.",
+	"Your users won't notice. Your backend integrations already have.",
+	"Chrome will auto-fix this. Java will throw SSLHandshakeException and ruin your day.",
+	"Browser: 'I got you, fam.' OpenSSL: 'Certificate verify failed. Goodbye.'",
+	"The website works. The API returns 'unable to verify the first certificate.' Fun.",
+}
+
+var browserWarnServiceFailSayings = []string{
+	"Browsers are struggling. API clients have given up entirely.",
+	"Even browsers are raising eyebrows. Services won't even try.",
+	"Browsers show a warning. Services throw an exception. Neither is great.",
+	"Your browser users get a scary page. Your API clients get a stack trace.",
+	"Browsers are barely holding on. Programmatic clients already left.",
+	"Warning in Chrome, hard fail in production. That's a rough combo.",
+	"The browser is being polite about it. The API client is not.",
+	"Browsers: 'Proceed anyway?' APIs: 'No. Absolutely not.'",
 }

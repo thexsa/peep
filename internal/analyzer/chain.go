@@ -222,9 +222,11 @@ func gradeChain(a ChainAnalysis) HealthStatus {
 	if a.HasWrongIntermediate {
 		grade = worst(grade, WrittenInCrayon)
 	}
-	if a.HasUnnecessaryRoot {
-		grade = worst(grade, MallCopCredentials)
-	}
+	// NOTE: HasUnnecessaryRoot is NOT graded here — it's a warning-level finding
+	// handled by the CHAIN_UNNECESSARY_ROOT warning code in the education package.
+	// Keeping it out of the chain grade allows the dual verdict system to correctly
+	// distinguish browser (pass — browsers ignore the extra root) from service
+	// (warn — some strict clients flag it).
 	if a.LeafOnlyMissingIntermediate {
 		grade = worst(grade, WrittenInCrayon)
 	}

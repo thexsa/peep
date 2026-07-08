@@ -33,7 +33,6 @@ Examples:
 
 func init() {
 	updateCmd.Flags().BoolVar(&flagUpdateCheck, "check", false, "Just check for updates, don't install")
-	updateCmd.Flags().BoolVar(&flagUpdateCheck, "sniff", false, "Just check for updates (alias for --check)")
 	updateCmd.Flags().BoolVar(&flagUpdateForce, "force", false, "Force update even if already on latest")
 	rootCmd.AddCommand(updateCmd)
 }

@@ -39,9 +39,22 @@ func RenderSummaryHeader(host, port, ip, protocol string, report *analyzer.Diagn
 	// Quick verdict
 	maxW := ContentWidth(2)
 	lines = append(lines, "")
-	lines = append(lines, fmt.Sprintf("  Verdict: %s", StatusBadge(report.OverallStatus)))
-	saying := RandomSaying(report.OverallStatus)
-	lines = append(lines, wrapBlock(saying, "  ", maxW, Theme.MutedStyle)...)
+	if isUnnecessaryRootOnly(report.Verdicts) {
+		// Special verdict for the unnecessary root cert case
+		badge := Theme.WarningStyle.Render("⚡ Unnecessary Main Character Arc")
+		lines = append(lines, fmt.Sprintf("  Verdict: %s", badge))
+		saying := PickSass(unnecessaryRootSayings)
+		lines = append(lines, wrapBlock(saying, "  ", maxW, Theme.MutedStyle)...)
+	} else if report.Verdicts.BrowserVerdict == report.Verdicts.ServiceVerdict {
+		// Same verdict — single line
+		lines = append(lines, fmt.Sprintf("  Verdict: %s", StatusBadge(report.Verdicts.ServiceVerdict)))
+		saying := RandomSaying(report.Verdicts.ServiceVerdict)
+		lines = append(lines, wrapBlock(saying, "  ", maxW, Theme.MutedStyle)...)
+	} else {
+		// Different verdicts — show both inline
+		lines = append(lines, fmt.Sprintf("  🌐 Browser:      %s", StatusBadge(report.Verdicts.BrowserVerdict)))
+		lines = append(lines, fmt.Sprintf("  🤖 Service/API:  %s", StatusBadge(report.Verdicts.ServiceVerdict)))
+	}
 
 	// Quick findings summary
 	if len(report.Warnings) > 0 {

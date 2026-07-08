@@ -61,12 +61,22 @@ func RenderOCSPStapleResult(result analyzer.OCSPStapleResult) string {
 	lines = append(lines, "")
 
 	if !result.Present {
-		lines = append(lines, renderKV("Stapled", Theme.WarningStyle.Render("No — server did not staple an OCSP response")))
-		lines = append(lines, renderKV("", Theme.MutedStyle.Render(PickSass(ocspStapleAbsentSayings))))
+		if result.HasMustStaple {
+			lines = append(lines, renderKV("Stapled", Theme.ErrorStyle.Render("No — server did not staple an OCSP response")))
+			lines = append(lines, renderKV("Must-Staple", Theme.ErrorStyle.Render("Yes — certificate requires a staple (RFC 7633)")))
+			lines = append(lines, renderKV("", Theme.ErrorStyle.Render(PickSass(ocspStapleMustStapleAbsentSayings))))
+		} else {
+			lines = append(lines, renderKV("Stapled", Theme.MutedStyle.Render("No — server did not staple an OCSP response")))
+			lines = append(lines, renderKV("", Theme.MutedStyle.Render(PickSass(ocspStapleAbsentSayings))))
+		}
 		return ApplyBorder(lines, SectionBorder) + "\n"
 	}
 
 	lines = append(lines, renderKV("Stapled", Theme.SuccessStyle.Render("Yes")))
+
+	if result.HasMustStaple {
+		lines = append(lines, renderKV("Must-Staple", Theme.SuccessStyle.Render("Yes — extension present, staple delivered")))
+	}
 
 	switch result.Status {
 	case analyzer.OCSPGood:
@@ -92,7 +102,11 @@ func RenderOCSPStapleResult(result analyzer.OCSPStapleResult) string {
 		label := "Next Update"
 		value := result.NextUpdate.Format("Jan 02, 2006 15:04:05 MST")
 		if result.IsStale {
-			value += Theme.ErrorStyle.Render(" (STALE — past due!)")
+			if result.HasMustStaple {
+				value += Theme.ErrorStyle.Render(" (STALE — Must-Staple violation!)")
+			} else {
+				value += Theme.ErrorStyle.Render(" (STALE — past due!)")
+			}
 		}
 		lines = append(lines, renderKV(label, value))
 	}
@@ -554,12 +568,20 @@ var ocspGoodSayings = []string{
 var ocspStapleAbsentSayings = []string{
 	"Every client now has to ask the CA directly. Hope they enjoy the latency.",
 	"Without stapling, the CA sees every visitor. Privacy? Never heard of it.",
-	"Your server had one job: staple the OCSP response. It chose not to.",
-	"No staple means every client does its own OCSP lookup. Or just skips it. Both are bad.",
-	"The server equivalent of 'I'll bring the dessert' and showing up empty-handed.",
+	"No staple, no Must-Staple. Not critical, but stapling is always a good idea.",
+	"No staple means every client does its own OCSP lookup. Or just skips it.",
 	"OCSP stapling is free, fast, and privacy-preserving. So naturally, it's not enabled.",
-	"Clients will soft-fail and skip the check. Congrats, you've made revocation optional.",
-	"Must-Staple extension + no staple = every strict client bounces. Check your extensions.",
+	"Clients will soft-fail and skip the check. Not a disaster without Must-Staple, but still.",
+	"No staple present. Informational — the cert doesn't require one.",
+}
+
+var ocspStapleMustStapleAbsentSayings = []string{
+	"Must-Staple is set. No staple delivered. Every compliant client is rejecting this.",
+	"The cert said 'I need a staple to survive.' The server let it die.",
+	"RFC 7633 requires a valid staple when Must-Staple is set. This is a hard fail.",
+	"Must-Staple + no staple = outage. Clients are dropping this connection right now.",
+	"The certificate opted into strict OCSP. The server didn't hold up its end.",
+	"Must-Staple without a staple is like a mandatory seatbelt law with no seatbelts in the car.",
 }
 
 var crlFetchFailSayings = []string{
@@ -608,6 +630,21 @@ var unnecessaryRootSayings = []string{
 	"Full chain plus root. It's giving 'reply all to the entire company.'",
 	"Your chain is valid but padded like a resume listing 'proficient in Microsoft Word.'",
 	"The root cert won't help clients that don't already trust it. That's not how trust stores work.",
+	"The server is sending the root CA. Clients already have it. That's like bringing your own bouncer to someone else's club.",
+	"Congrats, your server sends extra bytes that every client on earth will ignore. Peak overachiever energy.",
+	"Sending the root doesn't make it more trusted. It's already in the trust store. You're just padding the handshake.",
+	"Everything's valid. The only issue is your server mansplaining the root cert to clients that already trust it.",
+	"The TLS equivalent of CC'ing the CEO on a lunch order. Unnecessary but technically not wrong.",
+	"Your chain is correct, your certs are valid, and your server still felt the need to send the root. Overachievement that actually underachieves.",
+	"Fun fact: sending the root CA adds latency to every handshake for zero security benefit. But sure, go off.",
+	"The server included the root cert. Nobody asked. Nobody needed it. Nobody will use it. But it's there.",
+	"Everything else is perfect. Your server just has a compulsive need to over-share. Not a crime, but noted.",
+	"That root cert is taking up bandwidth like a carry-on bag full of airport magazines. Leave it at home.",
+	"Your server is the person who brings a printed copy of the agenda to a meeting that already has a screen.",
+	"Including the root CA is like stapling a dictionary to your essay. Correct? Technically. Necessary? No.",
+	"The trust store already has the root. Your server sending it is just a flex with zero impact.",
+	"One unnecessary cert in the chain. That's it. That's the only note. Remove it or don't. Nobody cares.",
+	"This server sends the root CA like it's trying to prove something. Spoiler: the trust store isn't impressed.",
 }
 
 // RenderCipherEnum renders the cipher suite enumeration results.

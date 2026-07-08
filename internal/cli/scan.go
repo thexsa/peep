@@ -37,6 +37,11 @@ the certificate — no external API calls needed. SCTs are cryptographic proof
 that the certificate was submitted to CT logs before issuance.
 Certificates from private/internal CAs are automatically skipped.
 
+Results include dual verdicts: Browser Compatibility (lenient — browsers
+self-heal many issues) and Service/API (strict — Go, OpenSSL, Java enforce
+strict chain order and reject aggressively). Run 'peep docs verdicts' to
+learn more about the grading system.
+
 Use --explain (--whytho) to add detailed explanations, recommended fixes,
 and documentation references for every finding. Works on all peep commands.
 
@@ -131,6 +136,13 @@ func runScan(cmd *cobra.Command, args []string) error {
 	var allWarnings []analyzer.Warning
 	allWarnings = append(allWarnings, education.BuildWarnings(report, flagInternalCA)...)
 
+	// Save original base grade before chain.OverallGrade gets mutated
+	// by warning severity folding below (lines that do chain.OverallGrade = w.Severity).
+	originalBaseGrade := chain.OverallGrade
+	if handshake.OverallGrade > originalBaseGrade {
+		originalBaseGrade = handshake.OverallGrade
+	}
+
 	// Handshake
 	fmt.Println(ui.RenderHandshakeCard(handshake))
 
@@ -144,7 +156,7 @@ func runScan(cmd *cobra.Command, args []string) error {
 		// OCSP Staple check (uses the TLS connection state)
 		if len(result.ConnState.PeerCertificates) >= 2 {
 			fmt.Println(ui.Theme.MutedStyle.Render("  Checking stapled OCSP response..."))
-			stapleResult := analyzer.CheckOCSPStaple(result.ConnState, result.ConnState.PeerCertificates[1])
+			stapleResult := analyzer.CheckOCSPStaple(result.ConnState, result.ConnState.PeerCertificates[1], result.ConnState.PeerCertificates[0])
 			fmt.Println(ui.RenderOCSPStapleResult(stapleResult))
 
 			// Collect OCSP staple warnings
@@ -206,10 +218,30 @@ func runScan(cmd *cobra.Command, args []string) error {
 		// CT log check (SCT parsing — no network call)
 		fmt.Println(ui.Theme.MutedStyle.Render("  Checking Certificate Transparency (embedded SCTs)..."))
 		ctResult := analyzer.CheckCTLogs(leaf.RawCert, chain.TrustStoreVerified)
-		fmt.Println(ui.RenderCTLogResult(ctResult, flagInternalCA))
 
-		// Collect CT warnings
-		ctWarnings := education.CheckCTWarnings(ctResult, flagInternalCA)
+		// Run CA origin detection BEFORE CT rendering so we can soften the
+		// CT output for private CAs instead of showing scary messaging.
+		detectedPrivateCA := false
+		var caOrigin *analyzer.CAOriginResult
+		if !flagInternalCA {
+			co := analyzer.DetectCAOrigin(chain, leaf.RawCert, ctResult.Found)
+			caOrigin = &co
+			if co.Assessment != "public_ca" {
+				detectedPrivateCA = true
+			}
+		}
+
+		// Render CT with private CA awareness (softens "no SCTs" for internal CAs)
+		isInternalCA := flagInternalCA || detectedPrivateCA
+		fmt.Println(ui.RenderCTLogResult(ctResult, isInternalCA))
+
+		// Render CA origin assessment (only when detected as non-public)
+		if caOrigin != nil && detectedPrivateCA {
+			fmt.Println(ui.RenderCAOriginEvidence(*caOrigin))
+		}
+
+		// Collect CT warnings (suppressed for private CAs)
+		ctWarnings := education.CheckCTWarnings(ctResult, isInternalCA)
 		allWarnings = append(allWarnings, ctWarnings...)
 		for _, w := range ctWarnings {
 			if w.Severity > chain.OverallGrade {
@@ -217,12 +249,9 @@ func runScan(cmd *cobra.Command, args []string) error {
 			}
 		}
 
-		// CA origin assessment (standard mode only — skip when --internal-ca is set)
-		if !flagInternalCA {
-			caOrigin := analyzer.DetectCAOrigin(chain, leaf.RawCert, ctResult.Found)
-			if caOrigin.Assessment != "public_ca" {
-				fmt.Println(ui.RenderCAOriginEvidence(caOrigin))
-			}
+		// Auto-suppress public-CA-only warnings when private CA detected
+		if detectedPrivateCA {
+			allWarnings = education.SuppressPublicCAOnlyWarnings(allWarnings)
 		}
 	}
 
@@ -250,16 +279,10 @@ func runScan(cmd *cobra.Command, args []string) error {
 		fmt.Println(ui.RenderWarnings(allWarnings, flagExplain))
 	}
 
-	// Overall
-	overallStatus := chain.OverallGrade
-	if handshake.OverallGrade > overallStatus {
-		overallStatus = handshake.OverallGrade
-	}
-	for _, w := range allWarnings {
-		if w.Severity > overallStatus {
-			overallStatus = w.Severity
-		}
-	}
+	// Compute dual verdicts (browser + service)
+	// Use originalBaseGrade (not chain.OverallGrade which has been mutated
+	// by warning severity folding above)
+	verdicts := education.EvaluateDualVerdict(originalBaseGrade, allWarnings)
 
 	// Scan duration
 	duration := fmt.Sprintf("  Scan completed in %s", time.Since(startTime).Round(time.Millisecond))
@@ -269,7 +292,7 @@ func runScan(cmd *cobra.Command, args []string) error {
 	fmt.Println(ui.Theme.MutedStyle.Render(duration))
 	fmt.Println()
 
-	fmt.Println(ui.RenderOverallStatus(overallStatus))
+	fmt.Println(ui.RenderDualVerdict(verdicts))
 
 	// Save certs if requested
 	if isSaveRequested(cmd) {
@@ -307,7 +330,7 @@ func runScanJSON(cmd *cobra.Command, result *probe.ProbeResult, host, port strin
 
 	// OCSP Staple
 	if len(result.ConnState.PeerCertificates) >= 2 {
-		stapleResult := analyzer.CheckOCSPStaple(result.ConnState, result.ConnState.PeerCertificates[1])
+		stapleResult := analyzer.CheckOCSPStaple(result.ConnState, result.ConnState.PeerCertificates[1], result.ConnState.PeerCertificates[0])
 		report.OCSPStaple = &stapleResult
 		allWarnings = append(allWarnings, education.CheckOCSPStapleWarnings(stapleResult)...)
 	}
@@ -337,6 +360,10 @@ func runScanJSON(cmd *cobra.Command, result *probe.ProbeResult, host, port strin
 		if !flagInternalCA {
 			caOrigin := analyzer.DetectCAOrigin(chain, leaf.RawCert, ctResult.Found)
 			report.CAOrigin = &caOrigin
+			if caOrigin.Assessment != "public_ca" {
+				// Auto-suppress warnings that only apply to public CAs
+				allWarnings = education.SuppressPublicCAOnlyWarnings(allWarnings)
+			}
 		}
 	}
 
@@ -346,16 +373,12 @@ func runScanJSON(cmd *cobra.Command, result *probe.ProbeResult, host, port strin
 	allWarnings = append(allWarnings, education.CheckCipherEnumWarnings(cipherResult)...)
 	allWarnings = append(allWarnings, education.CheckTLSVersionProbeWarnings(cipherResult)...)
 
-	// Calculate overall grade
-	overallStatus := chain.OverallGrade
-	if handshake.OverallGrade > overallStatus {
-		overallStatus = handshake.OverallGrade
+	// Compute dual verdicts
+	baseGrade := chain.OverallGrade
+	if handshake.OverallGrade > baseGrade {
+		baseGrade = handshake.OverallGrade
 	}
-	for _, w := range allWarnings {
-		if w.Severity > overallStatus {
-			overallStatus = w.Severity
-		}
-	}
+	verdicts := education.EvaluateDualVerdict(baseGrade, allWarnings)
 
 	// Strip explain/fix unless --explain
 	if !flagExplain {
@@ -374,7 +397,8 @@ func runScanJSON(cmd *cobra.Command, result *probe.ProbeResult, host, port strin
 	allWarnings = sanitizeWarnings(allWarnings)
 
 	report.Warnings = allWarnings
-	report.OverallStatus = overallStatus
+	report.OverallStatus = verdicts.ServiceVerdict
+	report.Verdicts = verdicts
 	report.ScanDurationMs = time.Since(startTime).Milliseconds()
 
 	data, err := marshalCleanJSON(report)

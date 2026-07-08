@@ -307,8 +307,10 @@ func runPeep(cmd *cobra.Command, args []string) error {
 	// Build warnings
 	report.Warnings = education.BuildWarnings(report, flagInternalCA)
 
-	// Calculate overall status
-	report.OverallStatus = worstOverall(report)
+	// Calculate dual verdicts (browser + service)
+	baseGrade := analyzer.HealthStatus(max(int(report.Handshake.OverallGrade), int(report.Chain.OverallGrade)))
+	report.Verdicts = education.EvaluateDualVerdict(baseGrade, report.Warnings)
+	report.OverallStatus = report.Verdicts.ServiceVerdict // backwards compat
 
 	// Render output
 	if flagJSON {
@@ -456,6 +458,7 @@ func renderJSON(report *analyzer.DiagnosticReport) error {
 		Chain          jsonChain                  `json:"chain"`
 		Warnings       []analyzer.Warning         `json:"warnings"`
 		OverallStatus  analyzer.HealthStatus      `json:"overall_status"`
+		Verdicts       analyzer.DualVerdict       `json:"verdicts"`
 		Details        bool                       `json:"details"`
 		Verbose        bool                       `json:"verbose"`
 		ScanDurationMs int64                      `json:"scan_duration_ms"`
@@ -519,6 +522,7 @@ func renderJSON(report *analyzer.DiagnosticReport) error {
 		Chain:          chain,
 		Warnings:       warnings,
 		OverallStatus:  report.OverallStatus,
+		Verdicts:       report.Verdicts,
 		Details:        flagDetails,
 		Verbose:        flagVerbose,
 		ScanDurationMs: report.ScanDuration.Milliseconds(),

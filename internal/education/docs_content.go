@@ -24,6 +24,7 @@ func GetTopics() []Topic {
 		topicCRL(),
 		topicOCSP(),
 		topicAIA(),
+		topicVerdicts(),
 		topicStartTLS(),
 		topicRDP(),
 		topicTroubleshooting(),
@@ -513,6 +514,161 @@ That breaks down into:
 
   💡 If peep shows HTTP/2 but a CBC cipher → something is misconfigured.
      If peep shows HTTP/1.1 when you expected HTTP/2 → check ciphers.
+`,
+	}
+}
+
+func topicVerdicts() Topic {
+	return Topic{
+		Name:    "verdicts",
+		Title:   "Verdicts — Dual-Scale Grading System",
+		Summary: "How peep scores Browser vs Service/API compatibility.",
+		Content: `
+⚖️  Verdicts — Dual-Scale Grading System
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+peep evaluates TLS configurations on two scales:
+
+  🌐 Browser Compatibility
+     How modern browsers (Chrome, Firefox, Safari, Edge) will handle this cert.
+     Browsers are forgiving — they dynamically rebuild chains, soft-fail on
+     OCSP/CRL, and auto-fix many misconfigurations.
+
+  🤖 Service / API Compatibility
+     How strict programmatic clients will handle this cert.
+     Go's crypto/tls, OpenSSL, Java, curl, and other tools enforce strict chain
+     order, require proper revocation checking, and reject aggressively.
+
+THE THREE GRADES
+━━━━━━━━━━━━━━━━
+
+  Main Character Energy (PASS)
+    Everything is configured correctly. No issues found. The gold standard.
+
+  Mall Cop Credentials (WARN)
+    It works, but there are concerns. Weak configurations, expiring certs,
+    missing best practices. Not broken, but could be better.
+
+  Written in Crayon (FAIL)
+    Critical issues. Expired certs, broken chains, insecure ciphers, or
+    revoked certificates. Clients will reject this connection.
+
+HOW GRADING WORKS
+━━━━━━━━━━━━━━━━━
+
+Both verdicts start with a base grade:
+
+  base = worst(HandshakeGrade, ChainGrade)
+
+Then warnings are applied:
+
+  Service/API:  worst(base, ALL warning severities)
+  Browser:      worst(base, non-browser-safe warning severities)
+
+The service verdict is always >= the browser verdict. The browser verdict
+can never be worse than the service verdict.
+
+BROWSER-SAFE WARNINGS
+━━━━━━━━━━━━━━━━━━━━━
+
+These findings are suppressed when computing the Browser verdict:
+
+  Chain Issues:
+    CHAIN_WRONG_ORDER         Browsers rebuild chain order dynamically
+    CHAIN_UNNECESSARY_ROOT    Browsers ignore extra root certs in the chain
+
+  OCSP/Revocation:
+    OCSP_STAPLE_MISSING       Browsers soft-fail OCSP by default
+    OCSP_STAPLE_STALE         Browsers soft-fail stale staples
+    OCSP_UNKNOWN              Browsers soft-fail "unknown" OCSP responses
+    OCSP_ERROR                Browsers soft-fail OCSP errors
+    OCSP_NETWORK_ERROR        Scanner network issue (already info-level)
+
+  CRL:
+    CRL_STALE                 Browsers use CRLite/CRLSets, not live CRL fetches
+    CRL_FETCH_FAILED          Browsers use pre-built revocation lists
+    CRL_NETWORK_ERROR         Scanner network issue (already info-level)
+
+  Certificate Transparency:
+    CT_NO_SCTS                Chrome has its own CT infrastructure
+    CT_PARSE_ERROR            Browsers don't block on SCT parse errors
+
+  Validity:
+    CERT_LONG_VALIDITY        Browsers warn but don't block on long validity
+    CERT_VALIDITY_PERIOD      Not enforced by most browsers
+
+NOT BROWSER-SAFE (both verdicts fail):
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  CERT_EXPIRED               All clients reject expired certs
+  CERT_HOSTNAME_MISMATCH     All clients reject hostname mismatches
+  CERT_SELF_SIGNED           Browsers show scary interstitial
+  CHAIN_MISSING_INTERMEDIATE Browsers try AIA fetching but it's unreliable
+  CIPHER_ENUM_INSECURE       Insecure ciphers are rejected everywhere
+  PROBE_SSLV3/TLSV10/11     Legacy protocols are blocked by all modern clients
+  *_REVOKED                  Revoked certs are rejected universally
+  *_MUST_STAPLE              Must-Staple violations are enforced by browsers
+
+WHEN VERDICTS DIVERGE
+━━━━━━━━━━━━━━━━━━━━━
+
+When the browser and service verdicts differ, peep shows root cause codes:
+
+  VERDICTS
+    🌐 Browser:      Main Character Energy
+    🤖 Service/API:  Mall Cop Credentials
+       👉 CHAIN_WRONG_ORDER
+
+This tells you: your website works fine in browsers, but your API clients
+(Go, Java, OpenSSL, curl) may have issues with the out-of-order chain.
+
+SPECIAL VERDICT: UNNECESSARY MAIN CHARACTER ARC
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+When the ONLY finding is CHAIN_UNNECESSARY_ROOT (the server sent the root CA
+cert in the chain, which is harmless but wasteful), peep displays a special
+verdict: "⚡ Unnecessary Main Character Arc"
+
+This means: everything is correct. The only issue is the server is sending
+an extra cert (the root) that clients already have in their trust store.
+It adds latency to the handshake without adding any security benefit.
+
+PRIVATE CA AUTO-DETECTION
+━━━━━━━━━━━━━━━━━━━━━━━━━
+
+peep auto-detects private/internal CAs using a confidence scoring system.
+When a private CA is detected, public-CA-only warnings are automatically
+suppressed — no need to pass --internal-ca:
+
+  Auto-suppressed for private CAs:
+    CT_NO_SCTS              Private CAs don't participate in CT
+    CT_PARSE_ERROR          SCTs are a public CA concept
+    CERT_LONG_VALIDITY      CA/B Forum 398-day limit is for public CAs only
+    CERT_VALIDITY_PERIOD    Internal certs commonly have longer validity
+
+  Detection evidence includes:
+    - Trust store validation (known public CA brand vs unknown root)
+    - LDAP URIs, internal domains, RFC1918 IPs in AIA/CDP
+    - Internal keywords in issuer/subject DN
+    - Certificate policy OIDs (CA/B Forum compliance)
+    - Embedded SCT presence
+    - Public CA branding + policy OID combinations
+
+JSON OUTPUT
+━━━━━━━━━━━
+
+In JSON mode, both verdicts appear:
+
+  {
+    "overall_status": "warn",     // Service verdict (backwards compat)
+    "verdicts": {
+      "browser_verdict": "pass",
+      "service_verdict": "warn",
+      "root_causes": ["CHAIN_WRONG_ORDER"]
+    }
+  }
+
+See also: peep docs chain, peep docs ocsp, peep docs ciphers
 `,
 	}
 }
