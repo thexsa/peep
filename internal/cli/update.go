@@ -2,6 +2,8 @@ package cli
 
 import (
 	"fmt"
+	"os"
+	"os/exec"
 
 	"github.com/spf13/cobra"
 
@@ -10,8 +12,9 @@ import (
 )
 
 var (
-	flagUpdateCheck bool
-	flagUpdateForce bool
+	flagUpdateCheck    bool
+	flagUpdateForce    bool
+	updateJustFinished bool // suppresses stale update notification after successful update
 )
 
 var updateCmd = &cobra.Command{
@@ -114,8 +117,18 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 	))
 	fmt.Println()
 
-	// Show what changed in this version
-	showWhatsNew(info.LatestVersion)
+	// Suppress the stale "Update available" notification from the background check
+	updateJustFinished = true
+
+	// Exec the NEW binary to show its own What's New blurb.
+	// The running process is still the old binary, so we need the new one to render
+	// its own release notes (it has the releaseNotes map for its version).
+	if binPath, err := os.Executable(); err == nil {
+		whatsNew := exec.Command(binPath, "whatsnew", info.LatestVersion)
+		whatsNew.Stdout = os.Stdout
+		whatsNew.Stderr = os.Stderr
+		_ = whatsNew.Run() // best-effort, don't fail the update if this errors
+	}
 
 	return nil
 }

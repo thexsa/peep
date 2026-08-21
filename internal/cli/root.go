@@ -212,7 +212,7 @@ func startBackgroundUpdateCheck() <-chan *updater.UpdateInfo {
 // printUpdateNotification reads from the channel and prints
 // a one-liner if an update is available.
 func printUpdateNotification(ch <-chan *updater.UpdateInfo) {
-	if ch == nil {
+	if ch == nil || updateJustFinished {
 		return
 	}
 
