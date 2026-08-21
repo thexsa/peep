@@ -13,11 +13,11 @@ import (
 // Add a new entry for each release. The key is the version WITHOUT the "v" prefix.
 // The blurb should be brief — detailed changelog is in CHANGELOG.md and on GitHub.
 var releaseNotes = map[string]string{
-	"0.7.0": `🔌 Connectivity check (-c) — TCP reachability test like telnet/netcat
-🔍 Port scanning (peep portscan) — TCP connect scan, top 50 or all 65,535 ports
-📜 Certificate discovery (peep find-certs) — protocol-aware cert scanning across ports
-🤝 6 new protocols — POP3, IMAP, MSSQL, MySQL, PostgreSQL, XMPP
-🏛️ CA store path — now shown after chain verification (pass or fail)`,
+	"0.7.0": `* Connectivity check (-c) — TCP reachability test like telnet/netcat
+* Port scanning (peep portscan) — TCP connect scan, top 50 or all 65,535 ports
+* Certificate discovery (peep find-certs) — protocol-aware cert scanning across ports
+* 6 new protocols — POP3, IMAP, MSSQL, MySQL, PostgreSQL, XMPP
+* CA store path — now shown after chain verification (pass or fail)`,
 }
 
 // releaseNotesURL is the base URL for release details on GitHub.
