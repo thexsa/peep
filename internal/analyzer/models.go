@@ -196,6 +196,7 @@ type ChainAnalysis struct {
 	TrustedRootFingerprint      string         `json:"trusted_root_fingerprint,omitempty"`
 	CustomTrustStore            bool           `json:"custom_trust_store,omitempty"`
 	CustomTrustStorePath        string         `json:"custom_trust_store_path,omitempty"`
+	SystemCAStorePath           string         `json:"system_ca_store_path,omitempty"`
 	OverallGrade                HealthStatus   `json:"overall_grade"`
 }
 

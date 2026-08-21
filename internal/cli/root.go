@@ -33,6 +33,7 @@ var (
 	flagRaw        bool   // -r/--raw/--ogle: raw x509 text output
 	flagInternalCA bool   // --internal-ca: adjust grading for internal/private CA certs
 	flagCABundle   string // --ca-bundle: path to custom CA bundle (replaces system trust store)
+	flagConnCheck  bool   // -c/--connect/--knock: TCP connectivity check only
 )
 
 var rootCmd = &cobra.Command{
@@ -45,15 +46,19 @@ broken in plain English, instead of cryptographic cave paintings — because
 "PKIX path building failed" was not helpful.
 
 Smart protocol detection: peep handles HTTPS, SMTP, RDP, LDAP,
-FTP, and more. Just give it a host and port.
+FTP, POP3, IMAP, MSSQL, MySQL, PostgreSQL, XMPP, and more.
+Just give it a host and port.
 
 Examples:
   peep example.com              Quick check on port 443
   peep example.com:8443         Check a specific port
+  peep -c server:3389           TCP connectivity check (like telnet/nc)
   peep -d example.com           Cert detail cards
   peep -v example.com           Full details + base64 PEM certs
   peep --whytho example.com     Explain issues with fixes & doc refs
   peep scan example.com         Deep scan with cipher enumeration
+  peep portscan example.com     TCP port scan (top 50 ports)
+  peep find-certs example.com   Discover TLS certificates across ports
   peep -P smtp server:2525      Force SMTP protocol on non-standard port
   peep --save example.com       Save all cert PEMs to files
   peep --save 0 example.com     Save just the leaf cert PEM
@@ -66,6 +71,8 @@ Examples:
 Use --examples on any command for detailed usage examples with jq queries:
   peep --examples               Show examples for the root command
   peep scan --examples          Show examples for deep scans
+  peep portscan --examples      Show port scan examples
+  peep find-certs --examples    Show cert discovery examples
   peep docs --examples          Show examples for the docs browser`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runPeep,
@@ -73,7 +80,7 @@ Use --examples on any command for detailed usage examples with jq queries:
 
 func init() {
 	// -P / --proto / --lens
-	rootCmd.PersistentFlags().StringVarP(&flagProto, "proto", "P", "", "Force protocol: tls, smtp, rdp, ldap, ftp (alias: --lens)")
+	rootCmd.PersistentFlags().StringVarP(&flagProto, "proto", "P", "", "Force protocol: tls, smtp, rdp, ldap, ftp, pop3, imap, mssql, mysql, postgres, xmpp (alias: --lens)")
 	rootCmd.PersistentFlags().StringVar(&flagProto, "lens", "", "Force protocol (alias for --proto)")
 
 	// -t / --timeout / --blink
@@ -120,12 +127,16 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&flagCABundle, "ca-bundle", "",
 		"Path to a CA certificate bundle (.pem, .crt, .cer, .der) — replaces system trust store")
 
+	// -c / --connect / --knock
+	rootCmd.PersistentFlags().BoolVarP(&flagConnCheck, "connect", "c", false, "TCP connectivity check only — no TLS (alias: --knock)")
+	rootCmd.PersistentFlags().BoolVar(&flagConnCheck, "knock", false, "TCP connectivity check (alias for --connect)")
+
 	// --examples / --show-me
 	rootCmd.PersistentFlags().BoolVar(&flagExamples, "examples", false, "Show contextual usage examples with jq queries")
 	rootCmd.PersistentFlags().BoolVar(&flagExamples, "show-me", false, "Show usage examples (alias for --examples)")
 
 	// Hide themed aliases from help — they'll be mentioned in primary flag descriptions
-	for _, alias := range []string{"lens", "blink", "shades", "blindfold", "stare", "gaze", "whytho", "polaroid", "show-me"} {
+	for _, alias := range []string{"lens", "blink", "shades", "blindfold", "stare", "gaze", "whytho", "polaroid", "show-me", "knock"} {
 		rootCmd.PersistentFlags().MarkHidden(alias)
 	}
 }
@@ -262,6 +273,14 @@ func runPeep(cmd *cobra.Command, args []string) error {
 
 	target := args[0]
 	host, port := parseTarget(target)
+
+	// -c / --connect: TCP connectivity check only — no TLS
+	if flagConnCheck {
+		if flagPlainText {
+			ui.EnablePlainText()
+		}
+		return runConnectivityCheck(host, port, time.Duration(flagTimeout)*time.Second)
+	}
 
 	startTime := time.Now()
 

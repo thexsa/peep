@@ -35,15 +35,19 @@ func AnalyzeChain(state *tls.ConnectionState, targetHost string, skipVerify bool
 		analysis.NoIssuingCAInResponse = true
 	}
 
+	// Always record the CA store path (even if verification fails or is skipped)
+	// so the UI can display which trust store was/would be used.
+	if caBundlePath != "" {
+		analysis.CustomTrustStore = true
+		analysis.CustomTrustStorePath = caBundlePath
+	} else {
+		analysis.SystemCAStorePath = GetSystemCAStorePath()
+	}
+
 	if !skipVerify && totalCerts > 0 {
 		analysis.TrustStoreVerified, analysis.VerificationError,
 			analysis.TrustedRootName, analysis.TrustedRootSerial,
 			analysis.TrustedRootFingerprint = verifyTrustStore(certs, targetHost, caBundlePath)
-
-		if caBundlePath != "" {
-			analysis.CustomTrustStore = true
-			analysis.CustomTrustStorePath = caBundlePath
-		}
 	}
 
 	analysis.OverallGrade = gradeChain(analysis)

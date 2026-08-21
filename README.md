@@ -59,6 +59,12 @@ peep scan google.com
 # SMTP with STARTTLS
 peep smtp.gmail.com:587
 
+# Check TCP connectivity (no TLS)
+peep -c example.com:3389
+
+# Scan common ports for open TCP connections
+peep portscan example.com
+
 # See graduated examples for any command (simple → advanced → JSON + jq)
 peep --examples
 peep scan --examples
@@ -140,6 +146,12 @@ Just give peep a host and port. It figures out the rest.
 | 389 | LDAP | STARTTLS extended operation |
 | 993/995 | IMAPS/POP3S | Direct TLS |
 | 21 | FTP | AUTH TLS upgrade |
+| 110 | POP3 | STLS upgrade |
+| 143 | IMAP | STARTTLS upgrade |
+| 1433 | MSSQL | TDS PreLogin TLS negotiation |
+| 3306 | MySQL | SSL request negotiation |
+| 5432 | PostgreSQL | SSLRequest protocol |
+| 5222 | XMPP | XML stream STARTTLS |
 
 Override with `-P`/`--proto` when services run on non-standard ports:
 ```bash
@@ -198,6 +210,8 @@ Not sure how to use a command? Add `--examples` to any command for graduated usa
 ```bash
 peep --examples               # Examples for the root command
 peep scan --examples           # Examples for deep scans
+peep portscan --examples       # Examples for port scanning
+peep find-certs --examples     # Examples for cert discovery
 peep docs --examples           # Examples for the docs browser
 peep update --examples         # Examples for self-update
 ```
@@ -277,6 +291,15 @@ peep scan example.com
 # Deep scan with explanations and remediation advice
 peep scan --explain example.com
 
+# Check TCP connectivity (no TLS handshake)
+peep -c example.com:3389
+
+# Scan top 50 ports for open TCP connections
+peep portscan example.com
+
+# Scan top 50 ports and identify TLS certificates (protocol-aware)
+peep find-certs example.com
+
 # Skip trust store verification (for self-signed certs)
 peep -i internal-server.local:443
 
@@ -301,13 +324,14 @@ Every flag has a standard name and a fun themed alias. Use whichever speaks to y
 
 | Short | Flag | Themed Alias | Description |
 |-------|------|-------------|-------------|
+| `-c` | `--connect` | `--knock` | TCP-only reachability test (no TLS handshake) |
 | `-d` | `--details` | `--gaze` | Show detailed cert info cards |
 | `-e` | `--explain` | `--whytho` | Explain each issue with fix recommendations and doc references |
 | `-h` | `--help` | | Show help |
 | `-i` | `--insecure` | `--blindfold` | Skip system trust store verification |
 | `-j` | `--json` | | JSON output for scripting (respects -d, -v, -e) |
 | `-p` | `--plain-text` | `--shades` | No color, no emoji, no Unicode — easy to copy/paste |
-| `-P` | `--proto` | `--lens` | Force protocol: `tls`, `smtp`, `rdp`, `ldap`, `ftp` |
+| `-P` | `--proto` | `--lens` | Force protocol: `tls`, `smtp`, `rdp`, `ldap`, `ftp`, `pop3`, `imap`, `mssql`, `mysql`, `postgres`, `xmpp` |
 | `-r` | `--raw` | | Raw x509 text output for each cert (like `openssl x509 -text`) |
 | `-s` | `--save` | `--polaroid` | Save cert PEM(s) to files. No value = all, or specify index |
 | `-t` | `--timeout` | `--blink` | Connection timeout in seconds (default: 5) |
@@ -321,6 +345,8 @@ Every flag has a standard name and a fun themed alias. Use whichever speaks to y
 | Command | Description |
 |---------|-------------|
 | `peep scan <host>` | Deep scan with cipher enumeration, OCSP, CRL, CT logs |
+| `peep portscan <host>` | TCP connect scan (top 50 ports by default, `--full` for all) |
+| `peep find-certs <host>` | Protocol-aware certificate discovery across ports |
 | `peep docs [topic]` | Built-in TLS reference |
 | `peep update` | Update peep to the latest version (alias: `peep upgrade`) |
 | `peep update --check` | Check for updates without installing |
@@ -336,6 +362,7 @@ peep -d -j example.com                 # JSON with detailed cert info
 peep --whytho example.com              # CLI with issue explanations (themed alias)
 peep --shades --whytho example.com     # Copy/paste friendly with explanations
 peep --polaroid example.com            # Save all cert PEMs (themed alias)
+peep -c -j example.com:443             # TCP connect test with JSON output
 ```
 
 ---
@@ -382,8 +409,9 @@ peep scan mail.corp.local --ca-bundle /path/to/corp-root-ca.crt --internal-ca
 The only outbound network requests peep makes are:
 
 1. **TLS connections** to the host you're scanning (that's the whole point)
-2. **OCSP/CRL checks** to the CA's responder (in `scan` mode only, to verify revocation status)
-3. **Update checks** to the GitHub Releases API (once every 24 hours, disabled with `PEEP_NO_UPDATE_CHECK=1`)
+2. **TCP connections** to ports on the target host (when using `portscan` or `find-certs` / `find-cert` / `-c`)
+3. **OCSP/CRL checks** to the CA's responder (in `scan` mode only, to verify revocation status)
+4. **Update checks** to the GitHub Releases API (once every 24 hours, disabled with `PEEP_NO_UPDATE_CHECK=1`)
 
 No hostnames, certificates, scan results, or any other data is sent anywhere. Ever. peep is a local tool that runs on your machine and talks only to the hosts you point it at.
 
@@ -445,6 +473,7 @@ peep completion powershell   # print to stdout
 | Task | openssl | peep |
 |------|---------|------|
 | Check a cert | `openssl s_client -connect host:443 -servername host < /dev/null 2>/dev/null \| openssl x509 -noout -dates` | `peep host` |
+| Scan ports / find certs | ❌ _Use nmap_ | `peep portscan` / `peep find-certs` |
 | Check SMTP cert | `openssl s_client -connect host:587 -starttls smtp` | `peep host:587` |
 | Check RDP cert | ❌ _Can't_ | `peep host:3389` |
 | See the chain | `openssl s_client -connect host:443 -showcerts` | `peep host` |

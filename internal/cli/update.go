@@ -114,6 +114,9 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 	))
 	fmt.Println()
 
+	// Show what changed in this version
+	showWhatsNew(info.LatestVersion)
+
 	return nil
 }
 

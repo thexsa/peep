@@ -78,6 +78,8 @@ func RenderChainDiagram(chain analyzer.ChainAnalysis, verbosity int) string {
 			trustLine += fmt.Sprintf(" (Trusted Root: %s)", chain.TrustedRootName)
 		}
 		lines = append(lines, Theme.SuccessStyle.Render(trustLine))
+		// Show the CA store path used for verification
+		lines = append(lines, renderCAStorePath(chain, noteIndent)...)
 		// In verbose mode, show the root's serial and fingerprint
 		if verbosity >= 1 && chain.TrustedRootSerial != "" {
 			lines = append(lines, Theme.MutedStyle.Render(fmt.Sprintf("%sSerial: %s", noteIndent, chain.TrustedRootSerial)))
@@ -91,7 +93,8 @@ func RenderChainDiagram(chain analyzer.ChainAnalysis, verbosity int) string {
 		lines = append(lines, "")
 		lines = append(lines, Theme.ErrorStyle.Render("[FAIL] Trust store verification failed"))
 		lines = append(lines, wrapBlock(chain.VerificationError, noteIndent, noteW, Theme.MutedStyle)...)
-		lines = append(lines, wrapBlock(chainFailedSaying(), noteIndent, noteW, Theme.MutedStyle)...)
+		// Show the CA store path with a snarky remark about the failed verification
+		lines = append(lines, renderCAStorePathWithSnark(chain, noteIndent, noteW)...)
 	}
 
 	return ApplyBorder(lines, SectionBorder) + "\n"
@@ -249,4 +252,54 @@ var wrongIntermediateSayings = []string{
 
 func wrongIntermediateSaying() string {
 	return PickSass(wrongIntermediateSayings)
+}
+
+// renderCAStorePath returns lines showing which CA trust store was or would have been used.
+// When failed is true, a sassy remark incorporating the path is appended.
+func renderCAStorePath(chain analyzer.ChainAnalysis, indent string) []string {
+	path := chain.SystemCAStorePath
+	if chain.CustomTrustStore && chain.CustomTrustStorePath != "" {
+		path = chain.CustomTrustStorePath
+	}
+	if path == "" {
+		return nil
+	}
+	lines := []string{Theme.MutedStyle.Render(fmt.Sprintf("%sCA Store: %s", indent, path))}
+	return lines
+}
+
+// renderCAStorePathWithSnark returns lines showing the CA store path with a sassy remark
+// that points out the path that could have been used for verification. Used when verification fails.
+func renderCAStorePathWithSnark(chain analyzer.ChainAnalysis, indent string, noteW int) []string {
+	path := chain.SystemCAStorePath
+	if chain.CustomTrustStore && chain.CustomTrustStorePath != "" {
+		path = chain.CustomTrustStorePath
+	}
+	if path == "" {
+		return nil
+	}
+	saying := nothingToVerifySaying(path)
+	return wrapBlock(saying, indent, noteW, Theme.MutedStyle)
+}
+
+// nothingToVerifySayings are remarks for failed verification that point to the CA store path.
+// Each one ends with a variation of "the CA Store: {path}" to remind the user where trust lives.
+var nothingToVerifySayings = []string{
+	"A proper chain would have been verified against %s. But here we are.",
+	"If someone had included the right certs, we'd be checking them against %s right now.",
+	"That trust store at %s is sitting there, ready and willing. Too bad there's nothing trustworthy to check.",
+	"The system trust store at %s had one job to do — and this cert didn't even give it a chance.",
+	"Somewhere in %s, a perfectly good root CA is wondering why it was never consulted.",
+	"Fun fact: %s contains trusted root certificates. This chain contains trust issues.",
+	"The certs in %s are ready to vouch for a proper chain. This isn't one.",
+	"A correctly configured chain would have sailed right through %s. This one sank at the dock.",
+	"The trust anchors in %s have seen some things. But they haven't seen this chain. Because it failed.",
+	"Maybe next time, give the trust store at %s something worth verifying.",
+	"Step 1: Build a valid chain. Step 2: Verify it against %s. You skipped step 1.",
+	"We checked %s. It checked back. The answer was no.",
+}
+
+func nothingToVerifySaying(path string) string {
+	template := PickSass(nothingToVerifySayings)
+	return fmt.Sprintf(template, path)
 }

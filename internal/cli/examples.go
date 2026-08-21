@@ -37,6 +37,10 @@ func getExamples(cmdName string) exampleSet {
 	switch cmdName {
 	case "scan":
 		return scanExamples()
+	case "portscan":
+		return portscanExamples()
+	case "find-certs":
+		return findCertsExamples()
 	case "docs":
 		return docsExamples()
 	case "update":
@@ -95,6 +99,14 @@ func rootExamples() exampleSet {
 			{
 				description: "Get all warnings with fix recommendations (requires -e):",
 				command:     "peep your.domain.com --json -e | jq '.warnings[] | {title, fix}'",
+			},
+			{
+				description: "TCP connectivity check (like telnet/netcat) — no TLS:",
+				command:     "peep -c your.endpoint.com:3389",
+			},
+			{
+				description: "Connectivity check with JSON output:",
+				command:     "peep -c -j your.endpoint.com:443",
 			},
 		},
 	}
@@ -250,4 +262,64 @@ func renderExamples(es exampleSet) {
 	}
 
 	fmt.Println(b.String())
+}
+
+// ─────────────────────────────────────────────
+// Portscan: peep portscan <host>
+// ─────────────────────────────────────────────
+func portscanExamples() exampleSet {
+	return exampleSet{
+		heading: "peep portscan — TCP Port Scanner",
+		jqTip:   true,
+		examples: []example{
+			{
+				description: "Scan the top 50 ports:",
+				command:     "peep portscan example.com",
+			},
+			{
+				description: "Full scan — all 65,535 ports:",
+				command:     "peep portscan --full example.com",
+			},
+			{
+				description: "JSON output — list open ports:",
+				command:     "peep portscan -j example.com | jq '.open_ports[].port'",
+			},
+			{
+				description: "JSON — filter for specific services:",
+				command:     "peep portscan -j example.com | jq '.open_ports[] | select(.service == \"HTTPS\")'",
+			},
+		},
+	}
+}
+
+// ─────────────────────────────────────────────
+// Find-certs: peep find-certs <host>
+// ─────────────────────────────────────────────
+func findCertsExamples() exampleSet {
+	return exampleSet{
+		heading: "peep find-certs — Certificate Discovery",
+		jqTip:   true,
+		examples: []example{
+			{
+				description: "Discover certificates on top 50 ports:",
+				command:     "peep find-certs example.com",
+			},
+			{
+				description: "Full discovery — all 65,535 ports:",
+				command:     "peep find-certs --full example.com",
+			},
+			{
+				description: "JSON output — list all discovered subjects:",
+				command:     "peep find-certs -j example.com | jq '.certificates[].subject'",
+			},
+			{
+				description: "JSON — find expiring certificates:",
+				command:     "peep find-certs -j example.com | jq '.certificates[] | select(.status == \"expiring\")'",
+			},
+			{
+				description: "JSON — show ports with self-signed certs:",
+				command:     "peep find-certs -j example.com | jq '.certificates[] | select(.is_self_signed) | .port'",
+			},
+		},
+	}
 }
