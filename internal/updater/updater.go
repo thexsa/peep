@@ -49,6 +49,7 @@ type UpdateInfo struct {
 	UpdateAvailable bool          `json:"update_available"`
 	ReleaseURL      string        `json:"release_url"`
 	InstallMethod   InstallMethod `json:"install_method"`
+	Force           bool          `json:"-"` // when true, reinstall even if same version
 }
 
 // githubRelease is the subset of the GitHub API response we need.
@@ -143,12 +144,12 @@ func DetectInstallMethod(currentVersion string) InstallMethod {
 }
 
 // PerformUpdate downloads and installs the latest version of peep.
-// For Homebrew installs, it runs `brew upgrade`. For GitHub binaries,
-// it downloads the correct platform binary and replaces the current one.
+// For Homebrew installs, it runs `brew upgrade` (or `brew reinstall` with --force).
+// For GitHub binaries, it downloads the correct platform binary and replaces the current one.
 func PerformUpdate(info *UpdateInfo) error {
 	switch info.InstallMethod {
 	case InstallHomebrew:
-		return updateViaHomebrew()
+		return updateViaHomebrew(info.Force)
 	case InstallGitHubBinary:
 		return updateViaGitHub(info)
 	case InstallDevBuild:
@@ -158,10 +159,13 @@ func PerformUpdate(info *UpdateInfo) error {
 	}
 }
 
-// updateViaHomebrew runs brew upgrade to update peep.
-func updateViaHomebrew() error {
-	// We import os/exec inline to run brew
-	cmd := execCommand("brew", "upgrade", brewFormula)
+// updateViaHomebrew runs brew upgrade (or reinstall with --force) to update peep.
+func updateViaHomebrew(force bool) error {
+	brewCmd := "upgrade"
+	if force {
+		brewCmd = "reinstall"
+	}
+	cmd := execCommand("brew", brewCmd, brewFormula)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()

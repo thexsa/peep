@@ -94,9 +94,14 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 	}
 
 	// Perform the update
+	info.Force = flagUpdateForce
 	updateVerb := "Downloading"
 	if method == updater.InstallHomebrew {
-		updateVerb = "Running brew upgrade"
+		if flagUpdateForce {
+			updateVerb = "Running brew reinstall"
+		} else {
+			updateVerb = "Running brew upgrade"
+		}
 	}
 	fmt.Println(ui.Theme.MutedStyle.Render(fmt.Sprintf("  %s...", updateVerb)))
 	fmt.Println()
