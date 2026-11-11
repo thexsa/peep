@@ -12,7 +12,7 @@ import (
 // RDP Protocol Constants for X.224 / TPKT negotiation
 const (
 	// TPKT header constants
-	tpktVersion = 3
+	tpktVersion  = 3
 	tpktReserved = 0
 
 	// X.224 Connection Request (CR) type
@@ -35,7 +35,7 @@ const (
 // probeRDP performs the RDP X.224 negotiation to upgrade to TLS and extract
 // the connection state. This is the magic that makes `peep server:3389` work
 // where `openssl s_client` would fail.
-func probeRDP(target, hostname string, timeout time.Duration) (*tls.ConnectionState, []string, error) {
+func probeRDP(target, hostname string, timeout time.Duration, customTLS *tls.Config) (*tls.ConnectionState, []string, error) {
 	var notes []string
 
 	notes = append(notes, "RDP is the diva of protocols — it won't just show you its cert if you knock on the door. You have to ask nicely in X.224 first. That's why openssl s_client doesn't work here.")
@@ -78,13 +78,10 @@ func probeRDP(target, hostname string, timeout time.Duration) (*tls.ConnectionSt
 	notes = append(notes, fmt.Sprintf("Server agreed to %s — upgrading to TLS", protoName))
 
 	// Step 4: Perform TLS handshake over the existing connection
-	tlsConf := &tls.Config{
-		InsecureSkipVerify: true,
-		ServerName:         hostname,
-	}
+	tlsConf := buildTLSConfig(customTLS, hostname)
 
-	// Clear the deadline for the TLS handshake — it has its own timeout
-	conn.SetDeadline(time.Time{})
+	// Bound the TLS handshake with the probe timeout
+	_ = conn.SetDeadline(time.Now().Add(timeout))
 
 	tlsConn := tls.Client(conn, tlsConf)
 	if err := tlsConn.Handshake(); err != nil {
@@ -103,9 +100,9 @@ func buildRDPConnectionRequest() []byte {
 	// RDP Negotiation Request structure (8 bytes):
 	//   type(1) + flags(1) + length(2) + requestedProtocols(4)
 	negReq := []byte{
-		rdpNegReq,      // type: RDP_NEG_REQ
-		0x00,           // flags
-		0x08, 0x00,     // length: 8 (little-endian)
+		rdpNegReq,  // type: RDP_NEG_REQ
+		0x00,       // flags
+		0x08, 0x00, // length: 8 (little-endian)
 		0x03, 0x00, 0x00, 0x00, // requestedProtocols: PROTOCOL_SSL | PROTOCOL_HYBRID
 	}
 
@@ -114,11 +111,11 @@ func buildRDPConnectionRequest() []byte {
 	//
 	// We'll use a minimal CR with no cookie, just the negotiation request.
 	x224Header := []byte{
-		0x00,   // length indicator (will be filled)
+		0x00,       // length indicator (will be filled)
 		x224TypeCR, // type: Connection Request
 		0x00, 0x00, // destination reference
 		0x00, 0x00, // source reference
-		0x00,       // class and options
+		0x00, // class and options
 	}
 
 	// Cookie: "Cookie: mstshash=peep\r\n"

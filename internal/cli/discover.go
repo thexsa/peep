@@ -3,14 +3,15 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
-	"net"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/spf13/cobra"
 
+	"github.com/thexsa/peep/internal/analyzer"
 	"github.com/thexsa/peep/internal/probe"
 	"github.com/thexsa/peep/internal/ui"
 )
@@ -31,7 +32,7 @@ var (
 
 var findCertsCmd = &cobra.Command{
 	Use:   "find-certs <host>",
-	Short: "Certificate discovery — find TLS certificates across ports",
+	Short: "Certificate discovery -- find TLS certificates across ports",
 	Long: `Discover TLS certificates across multiple ports using protocol-aware probing.
 
 This scans ports for TLS certificates, using the correct protocol negotiation
@@ -59,17 +60,19 @@ func init() {
 
 // certDiscoveryResult holds the result of probing a single port for a certificate.
 type certDiscoveryResult struct {
-	Port             int    `json:"port"`
-	Protocol         string `json:"protocol"`
-	Subject          string `json:"subject"`
-	Issuer           string `json:"issuer"`
-	NotBefore        string `json:"not_before"`
-	NotAfter         string `json:"not_after"`
-	DaysUntilExpiry  int    `json:"days_until_expiry"`
-	SerialNumber     string `json:"serial_number"`
-	SignatureAlg     string `json:"signature_algorithm"`
-	IsSelfSigned     bool   `json:"is_self_signed"`
-	Status           string `json:"status"` // "valid", "expiring", "expired"
+	Port            int    `json:"port"`
+	Protocol        string `json:"protocol"`
+	Subject         string `json:"subject"`
+	Issuer          string `json:"issuer"`
+	NotBefore       string `json:"not_before"`
+	NotAfter        string `json:"not_after"`
+	DaysUntilExpiry int    `json:"days_until_expiry"`
+	SerialNumber    string `json:"serial_number"`
+	SignatureAlg    string `json:"signature_algorithm"`
+	IsSelfSigned    bool   `json:"is_self_signed"`
+	MissingSANs     bool   `json:"missing_sans"`
+	CNOnlyMatch     bool   `json:"cn_only_match"`
+	Status          string `json:"status"` // "valid", "expiring", "expired", "missing-sans", "cn-only"
 }
 
 func runDiscover(cmd *cobra.Command, args []string) error {
@@ -87,16 +90,7 @@ func runDiscover(cmd *cobra.Command, args []string) error {
 
 	ui.ResetSass()
 
-	target := args[0]
-	target = strings.TrimPrefix(target, "https://")
-	target = strings.TrimPrefix(target, "http://")
-	target = strings.TrimSuffix(target, "/")
-
-	// Strip port if provided (discover scans many ports)
-	host, _, err := net.SplitHostPort(target)
-	if err != nil {
-		host = target
-	}
+	host := parseHostOnly(args[0])
 
 	timeout := time.Duration(flagTimeout) * time.Second
 
@@ -114,7 +108,7 @@ func runDiscover(cmd *cobra.Command, args []string) error {
 
 	totalPorts := len(ports)
 
-	// Determine concurrency
+	// Determine concurrency (clamped against OS RLIMIT_NOFILE on Unix)
 	maxWorkers := 100
 	probeTimeout := timeout
 	if flagDiscoverFull {
@@ -123,8 +117,10 @@ func runDiscover(cmd *cobra.Command, args []string) error {
 			probeTimeout = 2 * time.Second
 		}
 	}
+	maxWorkers = tuneWorkerConcurrency(maxWorkers)
 
 	startTime := time.Now()
+	showProgress := !flagJSON && ui.IsInteractiveTTY()
 
 	if !flagJSON {
 		fmt.Println(renderDiscoverBanner(host, totalPorts))
@@ -145,23 +141,38 @@ func runDiscover(cmd *cobra.Command, args []string) error {
 		go func() {
 			defer wg.Done()
 			for port := range portCh {
-				portStr := fmt.Sprintf("%d", port)
+				portStr := strconv.Itoa(port)
 
-				probeResult, probeErr := probe.Probe(probe.ProbeOptions{
-					Host:    host,
-					Port:    portStr,
-					Timeout: probeTimeout,
-				})
+				var (
+					probeResult *probe.ProbeResult
+					probeErr    error
+				)
+				for attempt := 0; attempt < 3; attempt++ {
+					probeResult, probeErr = probe.Probe(probe.ProbeOptions{
+						Host:    host,
+						Port:    portStr,
+						Timeout: probeTimeout,
+					})
+					if !isTransientSocketError(probeErr) {
+						break
+					}
+					time.Sleep(time.Duration(attempt+1) * 25 * time.Millisecond)
+				}
 
 				if probeErr == nil && probeResult.ConnState != nil &&
 					len(probeResult.ConnState.PeerCertificates) > 0 {
 
 					cert := probeResult.ConnState.PeerCertificates[0]
+					certAnalysis := analyzer.AnalyzeCert(cert, 0, len(probeResult.ConnState.PeerCertificates), host)
 					daysLeft := int(time.Until(cert.NotAfter).Hours() / 24)
 
 					status := "valid"
 					if daysLeft <= 0 {
 						status = "expired"
+					} else if certAnalysis.MissingSANs {
+						status = "missing-sans"
+					} else if certAnalysis.CNOnlyMatch {
+						status = "cn-only"
 					} else if daysLeft <= 30 {
 						status = "expiring"
 					}
@@ -179,6 +190,8 @@ func runDiscover(cmd *cobra.Command, args []string) error {
 						SerialNumber:    fmt.Sprintf("%X", cert.SerialNumber),
 						SignatureAlg:    cert.SignatureAlgorithm.String(),
 						IsSelfSigned:    isSelfSigned,
+						MissingSANs:     certAnalysis.MissingSANs,
+						CNOnlyMatch:     certAnalysis.CNOnlyMatch,
 						Status:          status,
 					}
 
@@ -196,7 +209,7 @@ func runDiscover(cmd *cobra.Command, args []string) error {
 
 				mu.Lock()
 				scanned++
-				if !flagJSON {
+				if showProgress {
 					fmt.Printf("\r  Discovering certificates... %d/%d", scanned, totalPorts)
 				}
 				mu.Unlock()
@@ -210,7 +223,7 @@ func runDiscover(cmd *cobra.Command, args []string) error {
 	close(portCh)
 	wg.Wait()
 
-	if !flagJSON {
+	if showProgress {
 		fmt.Printf("\r%s\n", strings.Repeat(" ", 60)) // clear progress line
 	}
 
@@ -231,10 +244,10 @@ func runDiscover(cmd *cobra.Command, args []string) error {
 
 func renderDiscoverJSON(host string, results []certDiscoveryResult, duration time.Duration) error {
 	output := struct {
-		Host            string                `json:"host"`
-		Certificates    []certDiscoveryResult `json:"certificates"`
-		TotalFound      int                   `json:"total_found"`
-		ScanTimeMs      int64                 `json:"scan_time_ms"`
+		Host         string                `json:"host"`
+		Certificates []certDiscoveryResult `json:"certificates"`
+		TotalFound   int                   `json:"total_found"`
+		ScanTimeMs   int64                 `json:"scan_time_ms"`
 	}{
 		Host:         host,
 		Certificates: results,
@@ -261,7 +274,7 @@ func renderDiscoverTable(host string, results []certDiscoveryResult, duration ti
 		lines = append(lines, ui.Theme.BoldStyle.Render(header))
 		lines = append(lines, ui.Theme.MutedStyle.Render("  "+strings.Repeat("─", 110)))
 
-		valid, expiring, expired := 0, 0, 0
+		valid, expiring, expired, invalidSAN := 0, 0, 0, 0
 		for _, r := range results {
 			var statusIcon string
 			switch r.Status {
@@ -274,6 +287,12 @@ func renderDiscoverTable(host string, results []certDiscoveryResult, duration ti
 			case "expired":
 				statusIcon = ui.Theme.ErrorStyle.Render("✗")
 				expired++
+			case "missing-sans":
+				statusIcon = ui.Theme.ErrorStyle.Render("✗ no SANs")
+				invalidSAN++
+			case "cn-only":
+				statusIcon = ui.Theme.ErrorStyle.Render("✗ CN-only")
+				invalidSAN++
 			}
 
 			subject := truncate(r.Subject, 26)
@@ -296,6 +315,9 @@ func renderDiscoverTable(host string, results []certDiscoveryResult, duration ti
 		}
 		if expired > 0 {
 			counts = append(counts, fmt.Sprintf("%d expired", expired))
+		}
+		if invalidSAN > 0 {
+			counts = append(counts, fmt.Sprintf("%d missing SANs/CN-only", invalidSAN))
 		}
 		if len(counts) > 0 {
 			summary += " (" + strings.Join(counts, ", ") + ")"
@@ -322,10 +344,16 @@ func renderDiscoverBanner(host string, portCount int) string {
 	return ui.ApplyBorder(lines, ui.HeaderBorder)
 }
 
-// truncate shortens a string to maxLen, adding "…" if truncated.
+// truncate shortens a string to maxLen, adding "..." in plain-text mode or "…" otherwise.
 func truncate(s string, maxLen int) string {
 	if len(s) <= maxLen {
 		return s
+	}
+	if ui.PlainTextMode {
+		if maxLen <= 3 {
+			return "..."[:maxLen]
+		}
+		return s[:maxLen-3] + "..."
 	}
 	if maxLen <= 1 {
 		return "…"

@@ -26,6 +26,7 @@ Because `openssl s_client` was designed for cryptographers, not for the person a
 | RDP certs: ❌ openssl can't even | `peep rdp-server:3389` just works |
 | Manually checking OCSP, CRL, CT, ciphers separately | `peep scan host` checks everything in one shot |
 | "It works in Chrome" (because Chrome does AIA chasing) | peep shows what `curl`, Go, Java, and Python actually see |
+| "It passed on Windows" (legacy Common Name fallback with no SANs) | peep deterministically flags missing SANs & CN-only certs across every OS |
 | Output designed for robots | Output designed for humans (with `--json` for the robots too) |
 | No fix recommendations | `peep --explain host` tells you exactly what to do |
 
@@ -46,6 +47,9 @@ peep expired.badssl.com
 
 # Wrong hostname — SNI mismatch
 peep wrong.host.badssl.com
+
+# Missing SANs — legacy Common Name fallback (rejected by modern browsers & TLS stacks)
+peep no-subject.badssl.com
 
 # Missing intermediate — the "works in Chrome but breaks everywhere else" problem
 peep incomplete-chain.badssl.com
@@ -80,13 +84,21 @@ peep scan --examples
 brew install thexsa/tap/peep
 ```
 
-### Quick Install (macOS / Linux)
+### Quick Install (macOS / Linux / AIX)
 
 ```bash
 curl -sSfL https://raw.githubusercontent.com/thexsa/peep/main/install.sh | sh
 ```
 
 Detects your OS and architecture, downloads the latest release, verifies the SHA-256 checksum, and asks where you'd like to install.
+
+### Quick Install (Windows PowerShell — No Admin Required)
+
+```powershell
+irm https://raw.githubusercontent.com/thexsa/peep/main/install.ps1 | iex
+```
+
+Detects Windows `amd64` or `arm64` (even under x64 emulation), verifies the SHA-256 checksum against `checksums-sha256.txt`, installs `peep.exe` to `%LOCALAPPDATA%\Programs\peep` (override with `$env:PEEP_INSTALL_DIR`), and adds it to your **user-level** `PATH` — no Administrator / UAC elevation required.
 
 ### Go Install
 
@@ -109,6 +121,7 @@ Grab the latest binary for your platform from the [Releases](https://github.com/
 | Linux (ppc64le) | `peep-linux-ppc64le` |
 | AIX (ppc64) | `peep-aix-ppc64` |
 | Windows (x86_64) | `peep-windows-amd64.exe` |
+| Windows (ARM64) | `peep-windows-arm64.exe` |
 
 ```bash
 # Download, make executable, add to PATH (example for macOS ARM)
@@ -117,7 +130,7 @@ chmod +x peep-darwin-arm64
 sudo mv peep-darwin-arm64 /usr/local/bin/peep
 ```
 
-**Windows:** Download `peep-windows-amd64.exe`, rename to `peep.exe`, and place in a directory in your `%PATH%`.
+**Windows (manual):** Download `peep-windows-amd64.exe` (or `peep-windows-arm64.exe`), rename to `peep.exe`, and place in a directory in your user `%PATH%` (such as `%LOCALAPPDATA%\Programs\peep`).
 
 ### Build from Source
 
@@ -127,7 +140,7 @@ Requires **Go 1.23+**. No CGO, no OpenSSL, no external dependencies.
 git clone https://github.com/thexsa/peep.git
 cd peep
 make build       # Build for your platform → ./peep
-make build-all   # Cross-compile all 7 platforms → dist/
+make build-all   # Cross-compile all 8 release platforms → dist/
 ```
 
 ---
@@ -219,7 +232,7 @@ peep update --examples         # Examples for self-update
 ### 🔒 CRL & Revocation Intelligence
 The deep scan checks CRL revocation by fetching the Certificate Revocation List and verifying the certificate serial is not present.
 
-**LDAP distribution points** (common with Microsoft AD CS) are automatically detected and skipped — peep will try HTTP endpoints instead and provide the `ldapsearch` command for manual verification from a domain-joined machine.
+**LDAP distribution points** (common with Microsoft AD CS) are automatically detected and skipped — peep will try HTTP endpoints instead and provide both `ldapsearch` (Linux/macOS/AIX) and `certutil -URL` (Windows) commands for manual verification from a domain-joined machine.
 
 **TLS endpoint warnings**: If the CRL endpoint has a certificate error (e.g., hostname mismatch), peep still fetches and verifies the CRL data (it's signed by the CA, so transport-layer TLS isn't required for integrity), but warns you.
 
@@ -320,22 +333,22 @@ peep docs --examples
 
 ### All Flags
 
-Every flag has a standard name and a fun themed alias. Use whichever speaks to you.
+Most flags also have a fun themed alias. Use whichever speaks to you.
 
 | Short | Flag | Themed Alias | Description |
 |-------|------|-------------|-------------|
-| `-c` | `--connect` | `--knock` | TCP-only reachability test (no TLS handshake) |
-| `-d` | `--details` | `--gaze` | Show detailed cert info cards |
+| `-c` | `--connect` | | TCP-only reachability test (no TLS handshake) |
+| `-d` | `--details` | | Show detailed cert info cards |
 | `-e` | `--explain` | `--whytho` | Explain each issue with fix recommendations and doc references |
 | `-h` | `--help` | | Show help |
 | `-i` | `--insecure` | `--blindfold` | Skip system trust store verification |
 | `-j` | `--json` | | JSON output for scripting (respects -d, -v, -e) |
-| `-p` | `--plain-text` | `--shades` | No color, no emoji, no Unicode — easy to copy/paste |
-| `-P` | `--proto` | `--lens` | Force protocol: `tls`, `smtp`, `rdp`, `ldap`, `ftp`, `pop3`, `imap`, `mssql`, `mysql`, `postgres`, `xmpp` |
+| `-p` | `--plain-text` | `--shades` | Strictly clean 7-bit ASCII output — zero color, zero emoji, zero Unicode (safe for CI logs, Windows `cmd.exe`, and AIX terminals) |
+| `-P` | `--proto` | | Force protocol: `tls`, `smtp`, `rdp`, `ldap`, `ftp`, `pop3`, `imap`, `mssql`, `mysql`, `postgres`, `xmpp` |
 | `-r` | `--raw` | | Raw x509 text output for each cert (like `openssl x509 -text`) |
 | `-s` | `--save` | `--polaroid` | Save cert PEM(s) to files. No value = all, or specify index |
 | `-t` | `--timeout` | `--blink` | Connection timeout in seconds (default: 5) |
-| `-v` | `--verbose` | `--stare` | Show base64 PEM encoded certs |
+| `-v` | `--verbose` | `--stare` | Show base64 PEM encoded certs and raw x509 output |
 | | `--examples` | `--show-me` | Show contextual usage examples with jq queries |
 | | `--internal-ca` | | Adjust grading for internal/private CA certs (skips SCT and 398-day checks) |
 | | `--ca-bundle` | | Path to CA certificate bundle (.pem, .crt, .cer, .der) — replaces system trust store |
@@ -377,6 +390,7 @@ Explicitly tell peep the certificate is from an internal CA. This adjusts gradin
 - **SCT warnings** are suppressed (internal CAs don't participate in Certificate Transparency)
 - **398-day validity warnings** are skipped (internal CAs commonly issue longer-lived certs)
 - The CA origin assessment block is hidden
+- **Missing SANs / CN-only fallback are still strictly enforced** — modern browsers (Chrome, Edge, Firefox, Safari) and TLS stacks (Go, Rustls, OpenSSL) reject SAN-less certificates even from private/enterprise CAs
 
 ```bash
 # Scan an internal server — skip public-CA-only checks
@@ -487,7 +501,7 @@ peep completion powershell   # print to stdout
 
 - **100% Go** — no CGO, no OpenSSL, no external runtime dependencies
 - **Single binary** — download and run, nothing to install
-- **Cross-platform** — macOS (ARM + Intel), Linux (amd64, arm64, ppc64le), AIX (ppc64), Windows (amd64)
+- **Cross-platform** — macOS (ARM + Intel), Linux (amd64, arm64, ppc64le), AIX (ppc64), Windows (amd64, arm64), FreeBSD (`go install` / source)
 - **CLI framework** — [spf13/cobra](https://github.com/spf13/cobra) (Apache 2.0)
 - **Terminal styling** — [charmbracelet/lipgloss](https://github.com/charmbracelet/lipgloss) (MIT)
 - **Terminal width** — [golang.org/x/term](https://pkg.go.dev/golang.org/x/term) (BSD-3-Clause)

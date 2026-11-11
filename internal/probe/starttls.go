@@ -11,7 +11,7 @@ import (
 
 // probeSTARTTLS performs an SMTP STARTTLS upgrade to extract TLS state.
 // This handles both port 587 (submission) and port 25 (relay).
-func probeSTARTTLS(target, hostname string, timeout time.Duration) (*tls.ConnectionState, []string, error) {
+func probeSTARTTLS(target, hostname string, timeout time.Duration, customTLS *tls.Config) (*tls.ConnectionState, []string, error) {
 	var notes []string
 
 	// Step 1: Open raw TCP connection
@@ -73,10 +73,8 @@ func probeSTARTTLS(target, hostname string, timeout time.Duration) (*tls.Connect
 	notes = append(notes, "STARTTLS upgrade initiated")
 
 	// Step 6: Upgrade connection to TLS
-	tlsConf := &tls.Config{
-		InsecureSkipVerify: true,
-		ServerName:         hostname,
-	}
+	tlsConf := buildTLSConfig(customTLS, hostname)
+	_ = conn.SetDeadline(time.Now().Add(timeout))
 
 	tlsConn := tls.Client(conn, tlsConf)
 	if err := tlsConn.Handshake(); err != nil {

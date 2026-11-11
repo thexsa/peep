@@ -7,8 +7,6 @@ import (
 	"github.com/thexsa/peep/internal/analyzer"
 )
 
-
-
 // RenderCertCard renders a detailed certificate info card.
 func RenderCertCard(cert analyzer.CertAnalysis) string {
 	name := cert.CommonName
@@ -61,12 +59,22 @@ func RenderCertCard(cert analyzer.CertAnalysis) string {
 	if len(cert.IPAddresses) > 0 {
 		lines = append(lines, renderKV("IP SANs", strings.Join(cert.IPAddresses, ", ")))
 	}
+	if cert.Role == analyzer.RoleLeaf && cert.MissingSANs {
+		lines = append(lines, renderKV("SANs", Theme.ErrorStyle.Render("NONE — missing Subject Alternative Name extension!")))
+	}
 
 	// Hostname match for leaf
 	if cert.Role == analyzer.RoleLeaf {
-		if cert.HostnameMatch {
+		switch {
+		case cert.HostnameMatch:
 			lines = append(lines, renderKV("Host Match", Theme.SuccessStyle.Render("Yes")))
-		} else {
+		case cert.MissingSANs && cert.CNOnlyMatch:
+			lines = append(lines, renderKV("Host Match", Theme.ErrorStyle.Render("NO — relies on deprecated Common Name (no SANs!)")))
+		case cert.MissingSANs:
+			lines = append(lines, renderKV("Host Match", Theme.ErrorStyle.Render("NO — certificate has no SANs")))
+		case cert.CNOnlyMatch:
+			lines = append(lines, renderKV("Host Match", Theme.ErrorStyle.Render("NO — only in deprecated Common Name (missing from SANs)")))
+		default:
 			lines = append(lines, renderKV("Host Match", Theme.ErrorStyle.Render("NO — wrong cert installed")))
 		}
 	}

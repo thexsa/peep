@@ -69,16 +69,27 @@ func AnalyzeCert(cert *x509.Certificate, depth int, totalCerts int, targetHost s
 		analysis.IsWildcard = true
 	}
 
-	// Hostname match (only relevant for leaf certs)
-	if depth == 0 && targetHost != "" {
-		analysis.HostnameMatch = checkHostnameMatch(cert, targetHost)
+	// SAN presence and hostname match (only relevant for leaf certs).
+	// Modern TLS (RFC 6125 / RFC 9525 / CA-B Forum BRs) requires server leaf
+	// certificates to carry DNS or IP Subject Alternative Names and forbids
+	// falling back to Subject CommonName.
+	if depth == 0 {
+		analysis.MissingSANs = len(cert.DNSNames) == 0 && len(cert.IPAddresses) == 0
+		if targetHost != "" {
+			analysis.HostnameMatch = checkHostnameMatch(cert, targetHost)
+			if !analysis.HostnameMatch {
+				analysis.CNOnlyMatch = checkCNMatch(cert.Subject.CommonName, targetHost)
+			}
+		} else {
+			analysis.HostnameMatch = !analysis.MissingSANs
+		}
 	} else {
 		analysis.HostnameMatch = true // Not applicable for non-leaf
 	}
 
 	// Overall grade for this cert
 	analysis.OverallGrade = worstOf(analysis.ExpiryGrade, analysis.SignatureGrade, analysis.KeyGrade)
-	if depth == 0 && !analysis.HostnameMatch {
+	if depth == 0 && (analysis.MissingSANs || !analysis.HostnameMatch) {
 		analysis.OverallGrade = WrittenInCrayon
 	}
 	if analysis.IsSelfSigned && depth == 0 {
@@ -173,31 +184,32 @@ func gradeKeyStrength(keyType string, bits int) HealthStatus {
 	return MallCopCredentials
 }
 
-// checkHostnameMatch verifies if the certificate covers the target hostname.
+// checkHostnameMatch strictly verifies whether the certificate's Subject
+// Alternative Names (DNSNames or IPAddresses) cover the target host.
+// Legacy Subject CommonName fallback is intentionally rejected across all OSes.
 func checkHostnameMatch(cert *x509.Certificate, hostname string) bool {
-	// If hostname is an IP, check IP SANs
-	if ip := net.ParseIP(hostname); ip != nil {
-		for _, certIP := range cert.IPAddresses {
-			if certIP.Equal(ip) {
-				return true
-			}
-		}
+	return cert.VerifyHostname(hostname) == nil
+}
+
+// checkCNMatch reports whether the target hostname or IP would have matched
+// the deprecated Subject CommonName field (used to diagnose CN-only fallback).
+func checkCNMatch(commonName, hostname string) bool {
+	commonName = strings.TrimSpace(commonName)
+	hostname = strings.TrimSpace(hostname)
+	if commonName == "" || hostname == "" {
 		return false
 	}
 
-	// Check DNS SANs
-	for _, name := range cert.DNSNames {
-		if matchHostname(name, hostname) {
-			return true
-		}
+	candidateIP := hostname
+	if len(candidateIP) >= 3 && candidateIP[0] == '[' && candidateIP[len(candidateIP)-1] == ']' {
+		candidateIP = candidateIP[1 : len(candidateIP)-1]
+	}
+	if ip := net.ParseIP(candidateIP); ip != nil {
+		cnIP := net.ParseIP(commonName)
+		return cnIP != nil && ip.Equal(cnIP)
 	}
 
-	// Fall back to CN (deprecated but still common)
-	if matchHostname(cert.Subject.CommonName, hostname) {
-		return true
-	}
-
-	return false
+	return matchHostname(strings.TrimSuffix(commonName, "."), strings.TrimSuffix(hostname, "."))
 }
 
 // matchHostname checks if a certificate name matches a hostname,

@@ -29,7 +29,7 @@ type OCSPResult struct {
 type OCSPStatus int
 
 const (
-	OCSPGood    OCSPStatus = iota
+	OCSPGood OCSPStatus = iota
 	OCSPRevoked
 	OCSPUnknown
 	OCSPError
@@ -140,15 +140,15 @@ func CheckOCSP(cert *x509.Certificate, issuer *x509.Certificate, timeout time.Du
 
 func revokeReasonText(reason int) string {
 	reasons := map[int]string{
-		0: "Unspecified",
-		1: "Key Compromise",
-		2: "CA Compromise",
-		3: "Affiliation Changed",
-		4: "Superseded",
-		5: "Cessation of Operation",
-		6: "Certificate Hold",
-		8: "Remove from CRL",
-		9: "Privilege Withdrawn",
+		0:  "Unspecified",
+		1:  "Key Compromise",
+		2:  "CA Compromise",
+		3:  "Affiliation Changed",
+		4:  "Superseded",
+		5:  "Cessation of Operation",
+		6:  "Certificate Hold",
+		8:  "Remove from CRL",
+		9:  "Privilege Withdrawn",
 		10: "AA Compromise",
 	}
 	if text, ok := reasons[reason]; ok {

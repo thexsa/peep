@@ -10,7 +10,7 @@ import (
 )
 
 // probeIMAPStartTLS performs an IMAP STARTTLS upgrade to extract TLS state.
-func probeIMAPStartTLS(target, hostname string, timeout time.Duration) (*tls.ConnectionState, []string, error) {
+func probeIMAPStartTLS(target, hostname string, timeout time.Duration, customTLS *tls.Config) (*tls.ConnectionState, []string, error) {
 	var notes []string
 
 	dialer := &net.Dialer{Timeout: timeout}
@@ -86,10 +86,8 @@ func probeIMAPStartTLS(target, hostname string, timeout time.Duration) (*tls.Con
 	notes = append(notes, "STARTTLS accepted — upgrading to TLS")
 
 	// Upgrade to TLS
-	tlsConf := &tls.Config{
-		InsecureSkipVerify: true,
-		ServerName:         hostname,
-	}
+	tlsConf := buildTLSConfig(customTLS, hostname)
+	_ = conn.SetDeadline(time.Now().Add(timeout))
 
 	tlsConn := tls.Client(conn, tlsConf)
 	if err := tlsConn.Handshake(); err != nil {

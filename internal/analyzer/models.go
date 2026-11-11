@@ -72,29 +72,29 @@ type DualVerdict struct {
 
 // TargetInfo holds information about the connection target.
 type TargetInfo struct {
-	Host       string `json:"host"`
-	Port       string `json:"port"`
-	IP         string `json:"ip"`
-	Protocol   string `json:"protocol"`
-	ProbeType  string `json:"probe_type"`
+	Host      string `json:"host"`
+	Port      string `json:"port"`
+	IP        string `json:"ip"`
+	Protocol  string `json:"protocol"`
+	ProbeType string `json:"probe_type"`
 }
 
 // HandshakeAnalysis holds the TLS handshake assessment.
 type HandshakeAnalysis struct {
-	TLSVersion      string       `json:"tls_version"`
-	TLSVersionRaw   uint16       `json:"tls_version_raw"`
-	CipherSuite     string       `json:"cipher_suite"`
-	CipherSuiteRaw  uint16       `json:"cipher_suite_raw"`
-	CipherGrade     HealthStatus `json:"cipher_grade"`
-	VersionGrade    HealthStatus `json:"version_grade"`
-	OverallGrade    HealthStatus `json:"overall_grade"`
+	TLSVersion     string       `json:"tls_version"`
+	TLSVersionRaw  uint16       `json:"tls_version_raw"`
+	CipherSuite    string       `json:"cipher_suite"`
+	CipherSuiteRaw uint16       `json:"cipher_suite_raw"`
+	CipherGrade    HealthStatus `json:"cipher_grade"`
+	VersionGrade   HealthStatus `json:"version_grade"`
+	OverallGrade   HealthStatus `json:"overall_grade"`
 }
 
 // CertRole identifies a certificate's position in the chain.
 type CertRole int
 
 const (
-	RoleLeaf         CertRole = iota
+	RoleLeaf CertRole = iota
 	RoleIntermediate
 	RoleRoot
 )
@@ -150,33 +150,35 @@ func (r CertRole) RoleExplanation() string {
 
 // CertAnalysis holds the assessment of a single certificate.
 type CertAnalysis struct {
-	Depth            int          `json:"depth"`
-	Role             CertRole     `json:"role"`
-	Subject          string       `json:"subject"`
-	Issuer           string       `json:"issuer"`
-	CommonName       string       `json:"common_name"`
-	Organization     string       `json:"organization,omitempty"`
-	DNSNames         []string     `json:"dns_names,omitempty"`
-	IPAddresses      []string     `json:"ip_addresses,omitempty"`
-	NotBefore        time.Time    `json:"not_before"`
-	NotAfter         time.Time    `json:"not_after"`
-	DaysRemaining    int          `json:"days_remaining"`
-	IsExpired        bool         `json:"is_expired"`
-	ExpiryGrade      HealthStatus `json:"expiry_grade"`
-	SerialNumber     string       `json:"serial_number"`
-	SignatureAlg     string       `json:"signature_algorithm"`
-	SignatureGrade   HealthStatus `json:"signature_grade"`
-	KeyType          string       `json:"key_type"`
-	KeyBits          int          `json:"key_bits"`
-	KeyGrade         HealthStatus `json:"key_grade"`
-	Fingerprint      string       `json:"fingerprint_sha256"`
-	IsSelfSigned     bool         `json:"is_self_signed"`
-	IsWildcard       bool         `json:"is_wildcard"`
-	IsCA             bool         `json:"is_ca"`
-	HostnameMatch    bool         `json:"hostname_match"`
-	ValidityDays     int          `json:"validity_days"`
-	OverallGrade     HealthStatus `json:"overall_grade"`
-	RawCert          *x509.Certificate `json:"-"`
+	Depth          int               `json:"depth"`
+	Role           CertRole          `json:"role"`
+	Subject        string            `json:"subject"`
+	Issuer         string            `json:"issuer"`
+	CommonName     string            `json:"common_name"`
+	Organization   string            `json:"organization,omitempty"`
+	DNSNames       []string          `json:"dns_names,omitempty"`
+	IPAddresses    []string          `json:"ip_addresses,omitempty"`
+	NotBefore      time.Time         `json:"not_before"`
+	NotAfter       time.Time         `json:"not_after"`
+	DaysRemaining  int               `json:"days_remaining"`
+	IsExpired      bool              `json:"is_expired"`
+	ExpiryGrade    HealthStatus      `json:"expiry_grade"`
+	SerialNumber   string            `json:"serial_number"`
+	SignatureAlg   string            `json:"signature_algorithm"`
+	SignatureGrade HealthStatus      `json:"signature_grade"`
+	KeyType        string            `json:"key_type"`
+	KeyBits        int               `json:"key_bits"`
+	KeyGrade       HealthStatus      `json:"key_grade"`
+	Fingerprint    string            `json:"fingerprint_sha256"`
+	IsSelfSigned   bool              `json:"is_self_signed"`
+	IsWildcard     bool              `json:"is_wildcard"`
+	IsCA           bool              `json:"is_ca"`
+	HostnameMatch  bool              `json:"hostname_match"`
+	MissingSANs    bool              `json:"missing_sans"`
+	CNOnlyMatch    bool              `json:"cn_only_match"`
+	ValidityDays   int               `json:"validity_days"`
+	OverallGrade   HealthStatus      `json:"overall_grade"`
+	RawCert        *x509.Certificate `json:"-"`
 }
 
 // ChainAnalysis holds the assessment of the entire certificate chain.
@@ -202,32 +204,32 @@ type ChainAnalysis struct {
 
 // DiagnosticReport is the complete output of a peep scan.
 type DiagnosticReport struct {
-	Target        TargetInfo        `json:"target"`
-	Handshake     HandshakeAnalysis `json:"handshake"`
-	Chain         ChainAnalysis     `json:"chain"`
-	CAOrigin      *CAOriginResult   `json:"ca_origin,omitempty"`
-	Warnings      []Warning         `json:"warnings"`
-	OverallStatus HealthStatus      `json:"overall_status"`
-	Verdicts      DualVerdict       `json:"verdicts"`
-	ScanDuration  time.Duration     `json:"scan_duration_ms"`
-	Timestamp     time.Time         `json:"timestamp"`
-	InternalCAMode bool            `json:"internal_ca_mode,omitempty"`
+	Target         TargetInfo        `json:"target"`
+	Handshake      HandshakeAnalysis `json:"handshake"`
+	Chain          ChainAnalysis     `json:"chain"`
+	CAOrigin       *CAOriginResult   `json:"ca_origin,omitempty"`
+	Warnings       []Warning         `json:"warnings"`
+	OverallStatus  HealthStatus      `json:"overall_status"`
+	Verdicts       DualVerdict       `json:"verdicts"`
+	ScanDuration   time.Duration     `json:"scan_duration_ms"`
+	Timestamp      time.Time         `json:"timestamp"`
+	InternalCAMode bool              `json:"internal_ca_mode,omitempty"`
 }
 
 // ScanReport wraps all results from a deep scan for JSON output.
 type ScanReport struct {
-	Target         TargetInfo         `json:"target"`
-	Handshake      HandshakeAnalysis  `json:"handshake"`
-	Chain          ChainAnalysis      `json:"chain"`
-	OCSPStaple     *OCSPStapleResult  `json:"ocsp_staple,omitempty"`
-	OCSP           *OCSPResult        `json:"ocsp,omitempty"`
-	CRL            *CRLResult         `json:"crl,omitempty"`
-	CT             *CTLogResult       `json:"ct,omitempty"`
-	Ciphers        *CipherEnumResult  `json:"ciphers,omitempty"`
-	CAOrigin       *CAOriginResult    `json:"ca_origin,omitempty"`
-	Warnings       []Warning          `json:"warnings,omitempty"`
-	OverallStatus  HealthStatus       `json:"overall_status"`
-	Verdicts       DualVerdict        `json:"verdicts"`
-	ScanDurationMs int64              `json:"scan_duration_ms"`
-	Timestamp      time.Time          `json:"timestamp"`
+	Target         TargetInfo        `json:"target"`
+	Handshake      HandshakeAnalysis `json:"handshake"`
+	Chain          ChainAnalysis     `json:"chain"`
+	OCSPStaple     *OCSPStapleResult `json:"ocsp_staple,omitempty"`
+	OCSP           *OCSPResult       `json:"ocsp,omitempty"`
+	CRL            *CRLResult        `json:"crl,omitempty"`
+	CT             *CTLogResult      `json:"ct,omitempty"`
+	Ciphers        *CipherEnumResult `json:"ciphers,omitempty"`
+	CAOrigin       *CAOriginResult   `json:"ca_origin,omitempty"`
+	Warnings       []Warning         `json:"warnings,omitempty"`
+	OverallStatus  HealthStatus      `json:"overall_status"`
+	Verdicts       DualVerdict       `json:"verdicts"`
+	ScanDurationMs int64             `json:"scan_duration_ms"`
+	Timestamp      time.Time         `json:"timestamp"`
 }

@@ -110,4 +110,3 @@ func hasMustStaple(cert *x509.Certificate) bool {
 // asn1OID is a local type alias to avoid importing encoding/asn1 just for
 // the Equal() method on pkix.Extension.Id (which is already asn1.ObjectIdentifier).
 type asn1OID = asn1.ObjectIdentifier
-

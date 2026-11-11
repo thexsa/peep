@@ -21,7 +21,7 @@ var completionCmd = &cobra.Command{
 	Short: "Generate or install shell autocompletion",
 	Long: `Generate or install shell autocompletion for peep.
 
-Auto-install (recommended — detects your shell and sets everything up):
+Auto-install (recommended -- detects your shell and sets everything up):
   peep completion --install
 
 Or generate a completion script for a specific shell:
@@ -31,15 +31,23 @@ Or generate a completion script for a specific shell:
   peep completion powershell
 
 The --install flag:
-  • Detects your current shell automatically
-  • Writes the completion script to ~/.peep/completions/
-  • Appends the necessary source line to your shell's rc file
-  • NEVER overwrites — only appends if not already present
-  • Supports zsh, bash, fish, and PowerShell`,
+  - Detects your current shell automatically (including PowerShell, Git Bash, zsh, bash, fish)
+  - Writes the completion script to ~/.peep/completions/ (or your PowerShell $PROFILE)
+  - Appends the necessary source line to your shell's rc file
+  - NEVER overwrites -- only appends if not already present
+  - Supports zsh, bash, fish, and PowerShell`,
 	Args:                  cobra.MaximumNArgs(1),
 	DisableFlagsInUseLine: true,
 	ValidArgs:             []string{"bash", "zsh", "fish", "powershell"},
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if showExamples(cmd.Name()) {
+			return nil
+		}
+
+		if flagPlainText {
+			ui.EnablePlainText()
+		}
+
 		if flagCompletionInstall {
 			// If a specific shell was given, use it; otherwise auto-detect
 			if len(args) == 1 {
@@ -53,14 +61,14 @@ The --install flag:
 		}
 
 		// Generate completion script to stdout (the default behavior)
-		switch args[0] {
+		switch strings.ToLower(args[0]) {
 		case "bash":
 			return rootCmd.GenBashCompletionV2(os.Stdout, true)
 		case "zsh":
 			return rootCmd.GenZshCompletion(os.Stdout)
 		case "fish":
 			return rootCmd.GenFishCompletion(os.Stdout, true)
-		case "powershell":
+		case "powershell", "pwsh":
 			return rootCmd.GenPowerShellCompletionWithDesc(os.Stdout)
 		default:
 			return fmt.Errorf("unsupported shell: %s (use bash, zsh, fish, or powershell)", args[0])
@@ -79,6 +87,10 @@ func init() {
 	rootCmd.AddCommand(completionCmd)
 }
 
+func printCompLine(s string) {
+	fmt.Println(ui.StripEmoji(s))
+}
+
 // runCompletionInstall auto-detects the user's shell and installs
 // tab-completion permanently.
 func runCompletionInstall() error {
@@ -87,7 +99,8 @@ func runCompletionInstall() error {
 }
 
 func installForShell(shell string) error {
-	switch shell {
+	normalized := strings.ToLower(strings.TrimSpace(shell))
+	switch normalized {
 	case "zsh":
 		return installZsh()
 	case "bash":
@@ -96,18 +109,33 @@ func installForShell(shell string) error {
 		return installFish()
 	case "powershell", "pwsh":
 		return installPowerShell()
-	default:
-		fmt.Println(ui.Theme.ErrorStyle.Render(
-			fmt.Sprintf("\n  [FAIL] Could not detect your shell (got %q).", shell)))
-		fmt.Println(ui.Theme.MutedStyle.Render(
-			"         Specify the shell explicitly:"))
-		fmt.Println(ui.Theme.InfoStyle.Render(
+	case "ksh", "rksh", "sh", "csh", "tcsh":
+		printCompLine(ui.Theme.WarningStyle.Render(
+			fmt.Sprintf("\n  [WARN] Shell %q does not support programmable Cobra completions.", shell)))
+		printCompLine(ui.Theme.MutedStyle.Render(
+			"         Install completions for a supported shell instead:"))
+		printCompLine(ui.Theme.InfoStyle.Render(
 			"           peep completion zsh --install"))
-		fmt.Println(ui.Theme.InfoStyle.Render(
+		printCompLine(ui.Theme.InfoStyle.Render(
 			"           peep completion bash --install"))
-		fmt.Println(ui.Theme.InfoStyle.Render(
+		printCompLine(ui.Theme.InfoStyle.Render(
 			"           peep completion fish --install"))
-		fmt.Println(ui.Theme.InfoStyle.Render(
+		printCompLine(ui.Theme.InfoStyle.Render(
+			"           peep completion powershell --install"))
+		fmt.Println()
+		return nil
+	default:
+		printCompLine(ui.Theme.ErrorStyle.Render(
+			fmt.Sprintf("\n  [FAIL] Could not detect your shell (got %q).", shell)))
+		printCompLine(ui.Theme.MutedStyle.Render(
+			"         Specify the shell explicitly:"))
+		printCompLine(ui.Theme.InfoStyle.Render(
+			"           peep completion zsh --install"))
+		printCompLine(ui.Theme.InfoStyle.Render(
+			"           peep completion bash --install"))
+		printCompLine(ui.Theme.InfoStyle.Render(
+			"           peep completion fish --install"))
+		printCompLine(ui.Theme.InfoStyle.Render(
 			"           peep completion powershell --install"))
 		fmt.Println()
 		return nil
@@ -115,17 +143,57 @@ func installForShell(shell string) error {
 }
 
 func detectShell() string {
-	// Windows: default to PowerShell
-	if runtime.GOOS == "windows" {
+	return detectShellFromEnv(runtime.GOOS, os.Getenv)
+}
+
+// detectShellFromEnv determines the active shell across Windows, macOS, Linux, AIX, and BSDs.
+func detectShellFromEnv(goos string, getenv func(string) string) string {
+	if goos == "windows" {
+		// Check Git Bash / MSYS2 / Cygwin / zsh on Windows BEFORE defaulting to PowerShell
+		if sh := getenv("SHELL"); sh != "" {
+			base := shellBaseName(sh)
+			switch base {
+			case "bash", "zsh", "fish":
+				return base
+			case "pwsh", "powershell":
+				return "powershell"
+			}
+		}
+		if getenv("MSYSTEM") != "" {
+			return "bash"
+		}
 		return "powershell"
 	}
 
-	// Unix: check $SHELL
-	shell := os.Getenv("SHELL")
+	// Unix: PowerShell Core (pwsh) exports PSModulePath inside interactive sessions
+	// while preserving the login $SHELL (e.g. /bin/zsh).
+	if getenv("PSModulePath") != "" {
+		return "powershell"
+	}
+
+	shell := getenv("SHELL")
 	if shell == "" {
 		return "unknown"
 	}
-	return filepath.Base(shell)
+	base := shellBaseName(shell)
+	if base == "pwsh" {
+		return "powershell"
+	}
+	if base == "" {
+		return "unknown"
+	}
+	return base
+}
+
+// shellBaseName extracts the lowercase binary name from either Unix or Windows paths.
+func shellBaseName(path string) string {
+	path = strings.TrimSpace(path)
+	if idx := strings.LastIndexAny(path, `/\`); idx != -1 {
+		path = path[idx+1:]
+	}
+	path = strings.ToLower(path)
+	path = strings.TrimSuffix(path, ".exe")
+	return path
 }
 
 // ─────────────────────────────────────────────
@@ -155,22 +223,41 @@ func installZsh() error {
 
 	// 2. Append fpath + compinit to .zshrc (only if not already present)
 	zshrc := filepath.Join(home, ".zshrc")
+	slashDir := filepath.ToSlash(completionDir)
 	marker := "# peep shell completion"
 	sourceLine := fmt.Sprintf(
-		"\n%s\nfpath=(%s $fpath)\nautoload -Uz compinit && compinit\n",
-		marker, completionDir)
+		"\n%s\nfpath=(\"%s\" $fpath)\nautoload -Uz compinit && compinit\n",
+		marker, slashDir)
 
 	if err := appendIfMissing(zshrc, marker, sourceLine); err != nil {
 		return fmt.Errorf("could not update %s: %w", zshrc, err)
 	}
 
-	printSuccess("zsh", zshrc, "source "+zshrc)
+	printSuccess("zsh", zshrc, fmt.Sprintf("source \"%s\"", filepath.ToSlash(zshrc)))
 	return nil
 }
 
 // ─────────────────────────────────────────────
 // Bash
 // ─────────────────────────────────────────────
+
+// selectBashRCFile picks the appropriate Bash startup file for the OS.
+// On macOS, Terminal.app and iTerm2 open login shells (~/.bash_profile) rather
+// than ~/.bashrc unless ~/.bash_profile explicitly sources ~/.bashrc.
+func selectBashRCFile(home, goos string) string {
+	bashrc := filepath.Join(home, ".bashrc")
+	if goos != "darwin" {
+		return bashrc
+	}
+
+	bashProfile := filepath.Join(home, ".bash_profile")
+	if _, err := os.Stat(bashrc); err == nil {
+		if data, readErr := os.ReadFile(bashProfile); readErr == nil && strings.Contains(string(data), ".bashrc") {
+			return bashrc
+		}
+	}
+	return bashProfile
+}
 
 func installBash() error {
 	home, err := os.UserHomeDir()
@@ -193,16 +280,22 @@ func installBash() error {
 		return fmt.Errorf("could not write %s: %w", completionFile, err)
 	}
 
-	// Append source line to .bashrc
-	bashrc := filepath.Join(home, ".bashrc")
+	// Append source line to the appropriate bash startup file (forward slashes + quotes for Windows Git Bash & spaces)
+	rcFile := selectBashRCFile(home, runtime.GOOS)
+	slashCompletion := filepath.ToSlash(completionFile)
 	marker := "# peep shell completion"
-	sourceLine := fmt.Sprintf("\n%s\nsource %s\n", marker, completionFile)
+	sourceLine := fmt.Sprintf("\n%s\nsource \"%s\"\n", marker, slashCompletion)
 
-	if err := appendIfMissing(bashrc, marker, sourceLine); err != nil {
-		return fmt.Errorf("could not update %s: %w", bashrc, err)
+	if err := appendIfMissing(rcFile, marker, sourceLine); err != nil {
+		return fmt.Errorf("could not update %s: %w", rcFile, err)
 	}
 
-	printSuccess("bash", bashrc, "source "+bashrc)
+	printSuccess("bash", rcFile, fmt.Sprintf("source \"%s\"", filepath.ToSlash(rcFile)))
+	if runtime.GOOS == "darwin" {
+		printCompLine(ui.Theme.MutedStyle.Render(
+			"  Note: macOS /bin/bash 3.2 requires bash-completion@2 (brew install bash-completion@2) or Homebrew bash."))
+		fmt.Println()
+	}
 	return nil
 }
 
@@ -233,13 +326,13 @@ func installFish() error {
 
 	// Fish auto-loads from this directory — no rc edit needed
 	fmt.Println()
-	fmt.Println(ui.Theme.BoldStyle.Render("  ✅ Fish completions installed!"))
+	printCompLine(ui.Theme.BoldStyle.Render("  ✅ Fish completions installed!"))
 	fmt.Println()
-	fmt.Println(ui.Theme.MutedStyle.Render(fmt.Sprintf("  Wrote: %s", completionFile)))
-	fmt.Println(ui.Theme.MutedStyle.Render("  Fish auto-loads from this directory — no config changes needed."))
+	printCompLine(ui.Theme.MutedStyle.Render(fmt.Sprintf("  Wrote: %s", completionFile)))
+	printCompLine(ui.Theme.MutedStyle.Render("  Fish auto-loads from this directory — no config changes needed."))
 	fmt.Println()
-	fmt.Println(ui.Theme.InfoStyle.Render("  Restart your terminal or run:"))
-	fmt.Println(ui.Theme.InfoStyle.Render("    source " + completionFile))
+	printCompLine(ui.Theme.InfoStyle.Render("  Restart your terminal or run:"))
+	printCompLine(ui.Theme.InfoStyle.Render(fmt.Sprintf("    source \"%s\"", filepath.ToSlash(completionFile))))
 	fmt.Println()
 	return nil
 }
@@ -252,12 +345,12 @@ func installPowerShell() error {
 	// Find the PowerShell profile path
 	profilePath := getPowerShellProfile()
 	if profilePath == "" {
-		fmt.Println(ui.Theme.ErrorStyle.Render("\n  [FAIL] Could not determine PowerShell profile path."))
-		fmt.Println(ui.Theme.MutedStyle.Render("         Run this in PowerShell to find it:"))
-		fmt.Println(ui.Theme.InfoStyle.Render("           echo $PROFILE"))
+		printCompLine(ui.Theme.ErrorStyle.Render("\n  [FAIL] Could not determine PowerShell profile path."))
+		printCompLine(ui.Theme.MutedStyle.Render("         Run this in PowerShell to find it:"))
+		printCompLine(ui.Theme.InfoStyle.Render("           echo $PROFILE"))
 		fmt.Println()
-		fmt.Println(ui.Theme.MutedStyle.Render("         Then add this line to your profile:"))
-		fmt.Println(ui.Theme.InfoStyle.Render("           peep completion powershell | Out-String | Invoke-Expression"))
+		printCompLine(ui.Theme.MutedStyle.Render("         Then add this line to your profile:"))
+		printCompLine(ui.Theme.InfoStyle.Render("           peep completion powershell | Out-String | Invoke-Expression"))
 		return nil
 	}
 
@@ -276,22 +369,30 @@ func installPowerShell() error {
 	}
 
 	fmt.Println()
-	fmt.Println(ui.Theme.BoldStyle.Render("  ✅ PowerShell completions installed!"))
+	printCompLine(ui.Theme.BoldStyle.Render("  ✅ PowerShell completions installed!"))
 	fmt.Println()
-	fmt.Println(ui.Theme.MutedStyle.Render(fmt.Sprintf("  Updated: %s", profilePath)))
+	printCompLine(ui.Theme.MutedStyle.Render(fmt.Sprintf("  Updated: %s", profilePath)))
 	fmt.Println()
-	fmt.Println(ui.Theme.InfoStyle.Render("  Restart PowerShell or run:"))
-	fmt.Println(ui.Theme.InfoStyle.Render(fmt.Sprintf("    . %s", profilePath)))
+	printCompLine(ui.Theme.InfoStyle.Render("  Restart PowerShell or run:"))
+	printCompLine(ui.Theme.InfoStyle.Render(fmt.Sprintf("    . \"%s\"", profilePath)))
 	fmt.Println()
-	fmt.Println(ui.Theme.WarningStyle.Render("  ⚠️  If you get an execution policy error, run:"))
-	fmt.Println(ui.Theme.InfoStyle.Render("    Set-ExecutionPolicy RemoteSigned -Scope CurrentUser"))
-	fmt.Println()
+	if runtime.GOOS == "windows" {
+		printCompLine(ui.Theme.WarningStyle.Render("  ⚠️  If you get an execution policy error, run:"))
+		printCompLine(ui.Theme.InfoStyle.Render("    Set-ExecutionPolicy RemoteSigned -Scope CurrentUser"))
+		fmt.Println()
+	}
 	return nil
 }
 
 func getPowerShellProfile() string {
-	// Try pwsh (PowerShell Core) first, then powershell (Windows PowerShell)
-	for _, ps := range []string{"pwsh", "powershell"} {
+	// Prefer whichever PowerShell edition matches the current session's PSModulePath
+	candidates := []string{"pwsh", "powershell"}
+	psMod := strings.ToLower(os.Getenv("PSModulePath"))
+	if strings.Contains(psMod, "windowspowershell") && !strings.Contains(psMod, `\powershell\modules`) {
+		candidates = []string{"powershell", "pwsh"}
+	}
+
+	for _, ps := range candidates {
 		out, err := exec.Command(ps, "-NoProfile", "-Command", "echo $PROFILE").Output()
 		if err == nil {
 			path := strings.TrimSpace(string(out))
@@ -338,11 +439,11 @@ func appendIfMissing(filePath, marker, content string) error {
 
 func printSuccess(shell, rcFile, reloadCmd string) {
 	fmt.Println()
-	fmt.Println(ui.Theme.BoldStyle.Render(fmt.Sprintf("  ✅ %s completions installed!", shell)))
+	printCompLine(ui.Theme.BoldStyle.Render(fmt.Sprintf("  ✅ %s completions installed!", shell)))
 	fmt.Println()
-	fmt.Println(ui.Theme.MutedStyle.Render(fmt.Sprintf("  Updated: %s", rcFile)))
+	printCompLine(ui.Theme.MutedStyle.Render(fmt.Sprintf("  Updated: %s", rcFile)))
 	fmt.Println()
-	fmt.Println(ui.Theme.InfoStyle.Render("  Restart your terminal, or run:"))
-	fmt.Println(ui.Theme.InfoStyle.Render(fmt.Sprintf("    %s", reloadCmd)))
+	printCompLine(ui.Theme.InfoStyle.Render("  Restart your terminal, or run:"))
+	printCompLine(ui.Theme.InfoStyle.Render(fmt.Sprintf("    %s", reloadCmd)))
 	fmt.Println()
 }

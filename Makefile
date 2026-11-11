@@ -16,6 +16,7 @@ build-all:
 	CGO_ENABLED=0 GOOS=linux   GOARCH=ppc64le go build -ldflags="$(LDFLAGS)" -o dist/$(BINARY)-linux-ppc64le      ./cmd/peep
 	CGO_ENABLED=0 GOOS=aix     GOARCH=ppc64   go build -ldflags="$(AIX_LDFLAGS)" -o dist/$(BINARY)-aix-ppc64          ./cmd/peep
 	CGO_ENABLED=0 GOOS=windows GOARCH=amd64   go build -ldflags="$(LDFLAGS)" -o dist/$(BINARY)-windows-amd64.exe  ./cmd/peep
+	CGO_ENABLED=0 GOOS=windows GOARCH=arm64   go build -ldflags="$(LDFLAGS)" -o dist/$(BINARY)-windows-arm64.exe  ./cmd/peep
 
 test:
 	go test ./...

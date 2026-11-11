@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"net"
 	"strings"
 
 	"github.com/thexsa/peep/internal/analyzer"
@@ -10,7 +11,7 @@ import (
 // RenderBanner displays the header section with connection info.
 func RenderBanner(host, port, ip, protocol string) string {
 	lines := []string{
-		Theme.BoldStyle.Render(fmt.Sprintf("  Peeping at %s:%s", host, port)),
+		Theme.BoldStyle.Render(fmt.Sprintf("  Peeping at %s", net.JoinHostPort(host, port))),
 		Theme.MutedStyle.Render(fmt.Sprintf("  IP: %s", ip)),
 		Theme.MutedStyle.Render(fmt.Sprintf("  Protocol: %s", protocol)),
 		Theme.SuccessStyle.Render(fmt.Sprintf("  %s handshake completed successfully", protocol)),
@@ -24,7 +25,7 @@ func RenderSummaryHeader(host, port, ip, protocol string, report *analyzer.Diagn
 	var lines []string
 
 	// Connection info
-	lines = append(lines, Theme.BoldStyle.Render(fmt.Sprintf("  Peeping at %s:%s", host, port)))
+	lines = append(lines, Theme.BoldStyle.Render(fmt.Sprintf("  Peeping at %s", net.JoinHostPort(host, port))))
 	lines = append(lines, Theme.MutedStyle.Render(fmt.Sprintf("  IP: %s", ip)))
 	lines = append(lines, Theme.MutedStyle.Render(fmt.Sprintf("  Protocol: %s", protocol)))
 	lines = append(lines, Theme.SuccessStyle.Render(fmt.Sprintf("  %s handshake completed successfully", protocol)))
@@ -61,6 +62,7 @@ func RenderSummaryHeader(host, port, ip, protocol string, report *analyzer.Diagn
 		lines = append(lines, "")
 		lines = append(lines, Theme.MutedStyle.Render(fmt.Sprintf("  Findings: %d issue(s) detected", len(report.Warnings))))
 		for _, w := range report.Warnings {
+			MarkSassUsed(w.Why)
 			icon := StatusIcon(w.Severity)
 			lines = append(lines, fmt.Sprintf("    %s %s", icon, w.Title))
 		}
@@ -92,9 +94,8 @@ func RenderVersion(version, installMethod, platform string) string {
 
 // RenderUpdateNotification returns a styled one-liner for update availability.
 func RenderUpdateNotification(current, latest string) string {
-	return Theme.WarningStyle.Render(
-		fmt.Sprintf("\n  💡 Update available: v%s → v%s (run `peep update` to upgrade)\n", current, latest),
-	)
+	msg := fmt.Sprintf("\n  💡 Update available: v%s → v%s (run `peep update` to upgrade)\n", current, latest)
+	return StripEmoji(Theme.WarningStyle.Render(msg))
 }
 
 var noIssuingCABannerSayings = []string{

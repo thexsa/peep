@@ -11,7 +11,7 @@ import (
 
 // probeFTPStartTLS performs an FTP AUTH TLS upgrade to extract TLS state.
 // This handles port 21 (standard FTP control channel).
-func probeFTPStartTLS(target, hostname string, timeout time.Duration) (*tls.ConnectionState, []string, error) {
+func probeFTPStartTLS(target, hostname string, timeout time.Duration, customTLS *tls.Config) (*tls.ConnectionState, []string, error) {
 	var notes []string
 
 	// Step 1: Open raw TCP connection
@@ -69,10 +69,8 @@ func probeFTPStartTLS(target, hostname string, timeout time.Duration) (*tls.Conn
 	}
 
 	// Step 4: Upgrade connection to TLS
-	tlsConf := &tls.Config{
-		InsecureSkipVerify: true,
-		ServerName:         hostname,
-	}
+	tlsConf := buildTLSConfig(customTLS, hostname)
+	_ = conn.SetDeadline(time.Now().Add(timeout))
 
 	tlsConn := tls.Client(conn, tlsConf)
 	if err := tlsConn.Handshake(); err != nil {

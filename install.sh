@@ -32,9 +32,11 @@ detect_os() {
   case "$(uname -s)" in
     Darwin) OS="darwin" ;;
     Linux)  OS="linux"  ;;
+    AIX)    OS="aix"    ;;
     CYGWIN*|MINGW*|MSYS*)
-      error "Windows is not supported by this installer. Use 'go install' or download from GitHub Releases:
-  https://github.com/${REPO}/releases" ;;
+      error "Windows shell detected. Run the PowerShell installer (no admin required):
+  powershell -ExecutionPolicy Bypass -Command \"irm https://raw.githubusercontent.com/${REPO}/main/install.ps1 | iex\"
+  Or download from GitHub Releases: https://github.com/${REPO}/releases" ;;
     *)
       error "Unsupported operating system: $(uname -s). Use 'go install' or download from GitHub Releases:
   https://github.com/${REPO}/releases" ;;
@@ -46,8 +48,14 @@ detect_os() {
 # ---------------------------------------------------------------------------
 
 detect_arch() {
+  # On IBM AIX, uname -m returns a 12-hex-digit machine ID (not ppc64).
+  if [ "${OS}" = "aix" ]; then
+    ARCH="ppc64"
+    return
+  fi
+
   case "$(uname -m)" in
-    x86_64)          ARCH="amd64"   ;;
+    x86_64|amd64)    ARCH="amd64"   ;;
     aarch64|arm64)   ARCH="arm64"   ;;
     ppc64le)         ARCH="ppc64le" ;;
     *)
@@ -62,7 +70,7 @@ detect_arch() {
 get_latest_version() {
   VERSION=$(curl -sSfL "https://api.github.com/repos/${REPO}/releases/latest" \
     | grep '"tag_name"' \
-    | sed -E 's/.*"([^"]+)".*/\1/')
+    | sed 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/')
 
   if [ -z "${VERSION}" ]; then
     error "Could not determine the latest version. Check your internet connection or visit:
@@ -143,13 +151,15 @@ verify_checksum() {
     return 0
   fi
 
-  # Compute actual checksum (sha256sum on Linux, shasum on macOS).
+  # Compute actual checksum (sha256sum on Linux, shasum on macOS, openssl on AIX).
   if command -v sha256sum >/dev/null 2>&1; then
     actual=$(sha256sum "${binary_path}" | awk '{print $1}')
   elif command -v shasum >/dev/null 2>&1; then
     actual=$(shasum -a 256 "${binary_path}" | awk '{print $1}')
+  elif command -v openssl >/dev/null 2>&1; then
+    actual=$(openssl dgst -sha256 "${binary_path}" | awk '{print $NF}')
   else
-    warn "Neither sha256sum nor shasum found — skipping checksum verification."
+    warn "Neither sha256sum, shasum, nor openssl found — skipping checksum verification."
     return 0
   fi
 
@@ -197,8 +207,11 @@ main() {
   # Ask user where to install.
   choose_install_dir
 
-  # Create a temp directory for downloads.
-  TMPDIR_INSTALL=$(mktemp -d)
+  # Create a temp directory for downloads (with POSIX/AIX fallback).
+  TMPDIR_INSTALL=$(mktemp -d 2>/dev/null || mktemp -d -t peep.XXXXXX 2>/dev/null || {
+    d="${TMPDIR:-/tmp}/peep-install.$$"
+    mkdir -m 700 "${d}" && printf "%s" "${d}"
+  })
 
   # Download the binary.
   printf "\nDownloading %s...\n" "${BINARY_NAME}"

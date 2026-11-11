@@ -7,10 +7,10 @@ import (
 
 // Topic represents a built-in documentation topic.
 type Topic struct {
-	Name     string
-	Title    string
-	Summary  string
-	Content  string
+	Name    string
+	Title   string
+	Summary string
+	Content string
 }
 
 // GetTopics returns all available documentation topics.
@@ -283,10 +283,26 @@ Think of certificates like a chain of vouching:
        If so, that Root CA cert must be installed on all corporate devices
        (laptops, servers, phones) for internal services to be trusted.
 
+🏷️  SUBJECT ALTERNATIVE NAMES (SANs) vs COMMON NAME (CN)
+  • Every TLS server leaf certificate MUST include a Subject Alternative Name
+    (SAN) extension listing all DNS hostnames (DNS:example.com) and/or IP
+    addresses (IP:10.0.0.1) it covers.
+  • Matching against the legacy Subject Common Name (CN) was deprecated by
+    RFC 2818 in May 2000 and banned by the CA/Browser Forum.
+  • Modern browsers (Chrome 58+, Edge, Firefox, Safari) and TLS stacks (Go,
+    Rustls, OpenSSL, Python, curl) strictly ignore CN and reject SAN-less
+    certificates — even for internal/private CAs.
+  • ⚠️  Cross-OS gotcha: legacy Windows CryptoAPI may silently fall back to CN
+    when no SAN extension is present, making a broken cert look fine on some
+    Windows tools while failing everywhere else. peep enforces strict SAN
+    verification deterministically across every OS and flag.
+
 🎯 COMMON MISTAKES:
   1. Forgetting to install the intermediate cert → broken chain!
-  2. Installing the root cert on the server → unnecessary, wastes bandwidth.
-  3. Confusing which cert goes where → the leaf goes on the server,
+  2. Putting the hostname only in Common Name (CN) with no SAN extension →
+     rejected by every modern browser and TLS client!
+  3. Installing the root cert on the server → unnecessary, wastes bandwidth.
+  4. Confusing which cert goes where → the leaf goes on the server,
      the intermediate goes WITH the leaf, the root stays in the trust store.
 `,
 	}
@@ -601,6 +617,8 @@ NOT BROWSER-SAFE (both verdicts fail):
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
   CERT_EXPIRED               All clients reject expired certs
+  CERT_MISSING_SANS          All modern browsers & clients reject SAN-less certs
+  CERT_CN_ONLY               Deprecated Common Name fallback is rejected universally
   CERT_HOSTNAME_MISMATCH     All clients reject hostname mismatches
   CERT_SELF_SIGNED           Browsers show scary interstitial
   CHAIN_MISSING_INTERMEDIATE Browsers try AIA fetching but it's unreliable
@@ -645,6 +663,10 @@ suppressed — no need to pass --internal-ca:
     CT_PARSE_ERROR          SCTs are a public CA concept
     CERT_LONG_VALIDITY      CA/B Forum 398-day limit is for public CAs only
     CERT_VALIDITY_PERIOD    Internal certs commonly have longer validity
+
+  ⚠️  Note: Missing SANs (CERT_MISSING_SANS) and CN-only fallback (CERT_CN_ONLY)
+     are NEVER suppressed for private/internal CAs — modern browsers and TLS
+     libraries require SANs regardless of whether the CA is public or private.
 
   Detection evidence includes:
     - Trust store validation (known public CA brand vs unknown root)
@@ -957,20 +979,21 @@ When something's wrong with TLS, here's your checklist:
    Look for: ❌ in the expiry line
    Fix: Renew the certificate from your CA
 
-2️⃣  WRONG CERT / HOSTNAME MISMATCH?
+2️⃣  WRONG CERT / HOSTNAME MISMATCH / MISSING SANs?
    Run: peep <host>
-   Look for: "❌ Hostname does NOT match"
-   Fix: Get a cert that covers the correct hostname/domain
-   Check the SANs (Subject Alternative Names) — the CN alone isn't enough
+   Look for: "[FAIL] Hostname does NOT match" or "Covers: NONE (missing SAN extension!)"
+   Fix: Issue a cert with a Subject Alternative Name (SAN) extension covering
+   every required DNS name or IP (e.g., openssl req ... -addext "subjectAltName = DNS:example.com").
+   The legacy Common Name (CN) alone is ignored by all modern browsers and TLS clients!
 
 3️⃣  MISSING INTERMEDIATE?
-   Run: peep chain <host>
+   Run: peep <host>
    Look for: "❌ Missing intermediate certificate"
    Fix: Download the intermediate cert from your CA and install it
    alongside the leaf cert
 
 4️⃣  WRONG CHAIN ORDER?
-   Run: peep chain <host>
+   Run: peep <host>
    Look for: "❌ Chain order is wrong"
    Fix: Re-concatenate your cert files: leaf cert first, then intermediate(s)
 
@@ -1016,7 +1039,8 @@ When something's wrong with TLS, here's your checklist:
       If the client is yours, update or patch the client.
       If neither is yours... good luck.
 
-💡 PRO TIP: Use -v for detailed cert info, or -vv for PEM encoded certs:
+💡 PRO TIP: Use -d for detailed cert cards, -r for raw X.509 fields, or -v for PEM + raw X.509:
+   peep -d <host>
    peep -v <host>
 
 ──────────────────────────────────────────────────────
@@ -1181,7 +1205,7 @@ When something's wrong with TLS, here's your checklist:
 
   • Expired intermediates: the intermediate cert can expire before
     the leaf cert. This breaks the chain even though the leaf is valid.
-    Fix: check ALL certs in the chain with: peep chain <host>
+    Fix: check ALL certs in the chain with: peep -d <host>
 
   • Clock skew: if the server or client clock is wrong, certs appear
     "not yet valid" or "expired." Check with: date; ntpstat
@@ -1227,6 +1251,10 @@ parties know to reject it.
       URI: http://crl.example-ca.com/intermediate.crl
 
   💡 CDPs are usually HTTP (not HTTPS) — see below for why.
+  💡 Microsoft AD CS often embeds ldap:///CN=... CDPs in internal certs.
+     When peep encounters an LDAP CDP during "peep scan", it tries any
+     HTTP fallback CDP automatically and prints ready-to-run verification
+     commands for both Unix (ldapsearch) and Windows (certutil -URL).
 
 ──────────────────────────────────────────────────────
 🔄 CRL LIFECYCLE
@@ -1662,26 +1690,30 @@ Example (from a cert's extensions):
      your server is broken for a large portion of the Internet.
 
 ──────────────────────────────────────────────────────
-🍎 macOS KEYCHAIN MAGIC
+🍎🪟 macOS KEYCHAIN & WINDOWS CRYPTOAPI MAGIC
 ──────────────────────────────────────────────────────
 
-  macOS has an extra layer of "helpful" behavior: the system Keychain
-  caches intermediate certificates globally. If Safari or any macOS
-  app fetches an intermediate via AIA, it gets stored in the Keychain
-  and is available to ALL apps on that machine.
+  macOS and Windows both have an extra layer of "helpful" OS behavior:
+    • macOS Keychain caches intermediate certificates globally whenever
+      Safari or another app fetches one via AIA.
+    • Windows CryptoAPI (CertGetCertificateChain) automatically chases
+      AIA caIssuers URLs over the network AND caches intermediates across
+      applications.
 
   This means:
-    • You visit a site in Safari → intermediate gets cached
-    • You run curl → curl "works" because macOS provides the cached
-      intermediate from the Keychain
+    • You visit a site in Safari or Edge → intermediate gets cached
+    • Or Windows CryptoAPI silently fetches a missing intermediate via AIA
     • You think your server's chain is fine
-    • You deploy to a Linux server / Docker container / CI → BROKEN
+    • You deploy to a Linux server / Docker container / CI / Java / Go /
+      Python / curl client → BROKEN ("unable to get local issuer certificate")
 
-  peep bypasses the macOS Keychain deliberately. It verifies the chain
-  using ONLY the certificates the server sent in the TLS handshake,
-  plus the system root trust store. No AIA chasing, no cached
-  intermediates. What peep shows you is what curl on a fresh Linux
-  box would see.
+  peep defeats silent OS chain-healing across ALL platforms. Even on
+  multi-intermediate chains where macOS SecTrust or Windows CryptoAPI
+  fills in a missing link behind the scenes, peep verifies that every
+  intermediate used to reach the root CA was actually sent on the wire
+  by the server. It also honors SSL_CERT_FILE and SSL_CERT_DIR consistently
+  across Linux, macOS, Windows, AIX, and FreeBSD. What peep shows you is
+  what strict clients on a clean box will see.
 
 ──────────────────────────────────────────────────────
 🛡️  WHY YOU CAN'T TRUST A ROOT CA FROM THE WIRE

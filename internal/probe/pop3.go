@@ -10,7 +10,7 @@ import (
 )
 
 // probePOP3StartTLS performs a POP3 STLS upgrade to extract TLS state.
-func probePOP3StartTLS(target, hostname string, timeout time.Duration) (*tls.ConnectionState, []string, error) {
+func probePOP3StartTLS(target, hostname string, timeout time.Duration, customTLS *tls.Config) (*tls.ConnectionState, []string, error) {
 	var notes []string
 
 	dialer := &net.Dialer{Timeout: timeout}
@@ -55,10 +55,8 @@ func probePOP3StartTLS(target, hostname string, timeout time.Duration) (*tls.Con
 	notes = append(notes, "STLS accepted — upgrading to TLS")
 
 	// Upgrade to TLS
-	tlsConf := &tls.Config{
-		InsecureSkipVerify: true,
-		ServerName:         hostname,
-	}
+	tlsConf := buildTLSConfig(customTLS, hostname)
+	_ = conn.SetDeadline(time.Now().Add(timeout))
 
 	tlsConn := tls.Client(conn, tlsConf)
 	if err := tlsConn.Handshake(); err != nil {

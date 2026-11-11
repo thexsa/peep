@@ -71,7 +71,7 @@ func runConnectivityCheck(host, port string, timeout time.Duration) error {
 
 	var lines []string
 	lines = append(lines, ui.Theme.BoldStyle.Render("CONNECTIVITY CHECK"))
-	lines = append(lines, fmt.Sprintf("Target:    %s:%s", host, port))
+	lines = append(lines, fmt.Sprintf("Target:    %s", target))
 	lines = append(lines, fmt.Sprintf("IP:        %s", ipStr))
 	lines = append(lines, "")
 

@@ -3,9 +3,10 @@ package analyzer
 import (
 	"crypto/tls"
 	"fmt"
-	"net"
 	"sort"
 	"time"
+
+	"github.com/thexsa/peep/internal/probe"
 )
 
 // CipherEnumResult holds the results of cipher suite enumeration.
@@ -17,11 +18,11 @@ type CipherEnumResult struct {
 
 // CipherSuiteInfo describes a single supported cipher suite.
 type CipherSuiteInfo struct {
-	ID       uint16       `json:"id"`
-	Name     string       `json:"name"`
-	Version  string       `json:"version"`
-	Secure   bool         `json:"secure"`
-	Grade    HealthStatus `json:"grade"`
+	ID      uint16       `json:"id"`
+	Name    string       `json:"name"`
+	Version string       `json:"version"`
+	Secure  bool         `json:"secure"`
+	Grade   HealthStatus `json:"grade"`
 }
 
 // TLSVersionSupport describes whether a specific TLS version is supported.
@@ -32,11 +33,17 @@ type TLSVersionSupport struct {
 	Grade     HealthStatus `json:"grade"`
 }
 
-// EnumerateCiphers probes the target to determine which TLS versions and
-// cipher suites are supported. This is similar to what sslscan does.
+// EnumerateCiphers probes the target using automatic port-based protocol detection
+// to determine which TLS versions and cipher suites are supported.
 func EnumerateCiphers(host, port string, timeout time.Duration) CipherEnumResult {
+	return EnumerateCiphersWithProto(host, port, "", timeout)
+}
+
+// EnumerateCiphersWithProto probes the target using the given protocol strategy
+// (Direct TLS, STARTTLS for SMTP/LDAP/FTP/IMAP/POP3/XMPP, X.224 for RDP, native SSL
+// negotiation for PostgreSQL/MySQL/MSSQL) to determine supported TLS versions and ciphers.
+func EnumerateCiphersWithProto(host, port, proto string, timeout time.Duration) CipherEnumResult {
 	result := CipherEnumResult{}
-	target := net.JoinHostPort(host, port)
 
 	// Test each TLS version
 	versions := []struct {
@@ -51,7 +58,7 @@ func EnumerateCiphers(host, port string, timeout time.Duration) CipherEnumResult
 	}
 
 	for _, v := range versions {
-		supported := testTLSVersion(target, host, v.id, timeout)
+		supported := testTLSVersion(host, port, proto, v.id, timeout)
 		grade := gradeTLSVersion(v.id)
 		result.TLSVersions = append(result.TLSVersions, TLSVersionSupport{
 			Version:   v.name,
@@ -62,7 +69,7 @@ func EnumerateCiphers(host, port string, timeout time.Duration) CipherEnumResult
 	}
 
 	// Enumerate cipher suites for TLS 1.2 (TLS 1.3 has fixed suites)
-	result.SupportedSuites = enumerateTLS12Ciphers(target, host, timeout)
+	result.SupportedSuites = enumerateTLS12Ciphers(host, port, proto, timeout)
 
 	// Add TLS 1.3 suites if supported
 	for _, v := range result.TLSVersions {
@@ -84,32 +91,33 @@ func EnumerateCiphers(host, port string, timeout time.Duration) CipherEnumResult
 	return result
 }
 
-// testTLSVersion attempts a connection with a specific TLS version.
-func testTLSVersion(target, hostname string, version uint16, timeout time.Duration) bool {
+// testTLSVersion attempts a protocol-aware connection with a specific TLS version.
+func testTLSVersion(host, port, proto string, version uint16, timeout time.Duration) bool {
 	conf := &tls.Config{
 		InsecureSkipVerify: true,
-		ServerName:         hostname,
+		ServerName:         host,
 		MinVersion:         version,
 		MaxVersion:         version,
 	}
 
-	dialer := &net.Dialer{Timeout: timeout}
-	conn, err := tls.DialWithDialer(dialer, "tcp", target, conf)
-	if err != nil {
-		return false
-	}
-	conn.Close()
-	return true
+	err := probe.TestHandshake(probe.ProbeOptions{
+		Host:      host,
+		Port:      port,
+		Timeout:   timeout,
+		Proto:     proto,
+		TLSConfig: conf,
+	})
+	return err == nil
 }
 
 // enumerateTLS12Ciphers tests each TLS 1.2 cipher suite to see which ones
 // the server supports.
-func enumerateTLS12Ciphers(target, hostname string, timeout time.Duration) []CipherSuiteInfo {
+func enumerateTLS12Ciphers(host, port, proto string, timeout time.Duration) []CipherSuiteInfo {
 	var supported []CipherSuiteInfo
 
 	// Test secure cipher suites
 	for _, suite := range tls.CipherSuites() {
-		if testCipherSuite(target, hostname, suite.ID, timeout) {
+		if testCipherSuite(host, port, proto, suite.ID, timeout) {
 			supported = append(supported, CipherSuiteInfo{
 				ID:      suite.ID,
 				Name:    suite.Name,
@@ -122,7 +130,7 @@ func enumerateTLS12Ciphers(target, hostname string, timeout time.Duration) []Cip
 
 	// Test insecure cipher suites
 	for _, suite := range tls.InsecureCipherSuites() {
-		if testCipherSuite(target, hostname, suite.ID, timeout) {
+		if testCipherSuite(host, port, proto, suite.ID, timeout) {
 			supported = append(supported, CipherSuiteInfo{
 				ID:      suite.ID,
 				Name:    suite.Name,
@@ -136,23 +144,24 @@ func enumerateTLS12Ciphers(target, hostname string, timeout time.Duration) []Cip
 	return supported
 }
 
-// testCipherSuite attempts a connection with a specific cipher suite.
-func testCipherSuite(target, hostname string, suiteID uint16, timeout time.Duration) bool {
+// testCipherSuite attempts a protocol-aware connection with a specific cipher suite.
+func testCipherSuite(host, port, proto string, suiteID uint16, timeout time.Duration) bool {
 	conf := &tls.Config{
 		InsecureSkipVerify: true,
-		ServerName:         hostname,
+		ServerName:         host,
 		MinVersion:         tls.VersionTLS12,
 		MaxVersion:         tls.VersionTLS12,
 		CipherSuites:       []uint16{suiteID},
 	}
 
-	dialer := &net.Dialer{Timeout: timeout}
-	conn, err := tls.DialWithDialer(dialer, "tcp", target, conf)
-	if err != nil {
-		return false
-	}
-	conn.Close()
-	return true
+	err := probe.TestHandshake(probe.ProbeOptions{
+		Host:      host,
+		Port:      port,
+		Timeout:   timeout,
+		Proto:     proto,
+		TLSConfig: conf,
+	})
+	return err == nil
 }
 
 // getTLS13Suites returns the TLS 1.3 cipher suites (they're all secure).

@@ -13,7 +13,7 @@ import (
 
 // probeLDAPStartTLS performs an LDAP Extended Operation for STARTTLS,
 // then upgrades the connection to TLS.
-func probeLDAPStartTLS(target, hostname string, timeout time.Duration) (*tls.ConnectionState, []string, error) {
+func probeLDAPStartTLS(target, hostname string, timeout time.Duration, customTLS *tls.Config) (*tls.ConnectionState, []string, error) {
 	var notes []string
 
 	// Step 1: Open raw TCP connection
@@ -47,13 +47,10 @@ func probeLDAPStartTLS(target, hostname string, timeout time.Duration) (*tls.Con
 	notes = append(notes, "LDAP server accepted STARTTLS — upgrading connection")
 
 	// Step 4: Upgrade to TLS
-	tlsConf := &tls.Config{
-		InsecureSkipVerify: true,
-		ServerName:         hostname,
-	}
+	tlsConf := buildTLSConfig(customTLS, hostname)
 
-	// Clear deadline for TLS handshake
-	conn.SetDeadline(time.Time{})
+	// Bound deadline for TLS handshake
+	_ = conn.SetDeadline(time.Now().Add(timeout))
 
 	tlsConn := tls.Client(conn, tlsConf)
 	if err := tlsConn.Handshake(); err != nil {

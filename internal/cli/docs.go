@@ -20,9 +20,9 @@ var (
 
 var docsCmd = &cobra.Command{
 	Use:   "docs [topic]",
-	Short: "📚 Built-in TLS reference guide (supports --search, --all, --json)",
+	Short: "Built-in TLS reference guide (supports --search, --all, --json)",
 	Long: `Access peep's built-in educational documentation.
-Learn about TLS, certificates, cipher suites, and more —
+Learn about TLS, certificates, cipher suites, and more --
 written for humans, not RFCs.
 
 Available topics:
@@ -349,24 +349,24 @@ func runDocsSearch(query string) error {
 	}
 
 	// Multiple matches: show summary
-	fmt.Println(ui.Theme.InfoStyle.Render(
-		fmt.Sprintf("  Found %q in %d topics:\n", query, len(hits))))
+	fmt.Println(ui.StripEmoji(ui.Theme.InfoStyle.Render(
+		fmt.Sprintf("  Found %q in %d topics:\n", query, len(hits)))))
 
 	for _, h := range hits {
-		fmt.Printf("    %-20s", h.topic.Name)
+		line := fmt.Sprintf("    %-20s", h.topic.Name)
 		if len(h.matches) > 0 {
 			// Show first match line as context
-			context := h.matches[0]
+			context := ui.StripEmoji(h.matches[0])
 			if len(context) > 80 {
 				context = context[:77] + "..."
 			}
-			fmt.Printf(" — %s", ui.Theme.MutedStyle.Render(context))
+			line += ui.StripEmoji(fmt.Sprintf(" — %s", ui.Theme.MutedStyle.Render(context)))
 		}
-		fmt.Println()
+		fmt.Println(line)
 	}
 
 	fmt.Println()
-	fmt.Println(ui.Theme.MutedStyle.Render("  Run: peep docs <topic> to read the full topic."))
+	fmt.Println(ui.StripEmoji(ui.Theme.MutedStyle.Render("  Run: peep docs <topic> to read the full topic.")))
 	return nil
 }
 

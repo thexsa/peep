@@ -3,7 +3,6 @@ package cli
 import (
 	"encoding/pem"
 	"fmt"
-	"net"
 	"os"
 	"strconv"
 	"strings"
@@ -25,24 +24,24 @@ var (
 	flagJSON       bool
 	flagPlainText  bool
 	flagInsecure   bool
-	flagVerbose    bool   // -v/--verbose/--stare: PEM certs (was -vv)
-	flagDetails    bool   // -d/--details/--gaze: cert detail cards (was -v)
+	flagVerbose    bool   // -v/--verbose/--stare: PEM certs + raw x509
+	flagDetails    bool   // -d/--details: cert detail cards
 	flagExplain    bool   // -e/--explain/--whytho
 	flagSave       string // -s/--save/--polaroid: "all" or index number
 	flagSaveSet    bool   // tracks whether --save was explicitly set
-	flagRaw        bool   // -r/--raw/--ogle: raw x509 text output
+	flagRaw        bool   // -r/--raw: raw x509 text output
 	flagInternalCA bool   // --internal-ca: adjust grading for internal/private CA certs
 	flagCABundle   string // --ca-bundle: path to custom CA bundle (replaces system trust store)
-	flagConnCheck  bool   // -c/--connect/--knock: TCP connectivity check only
+	flagConnCheck  bool   // -c/--connect: TCP connectivity check only
 )
 
 var rootCmd = &cobra.Command{
 	Use:   "peep <host>[:<port>]",
-	Short: "peep — your digital eyes for TLS diagnostics",
+	Short: "peep -- your digital eyes for TLS diagnostics",
 	Long: `peep is a TLS diagnostic tool for support engineers, SREs, platform
 folks, and anyone who is tired of pretending hex dumps are a personality.
 It peeps into TLS handshakes & certificate chains, & tells you what's
-broken in plain English, instead of cryptographic cave paintings — because
+broken in plain English, instead of cryptographic cave paintings -- because
 "PKIX path building failed" was not helpful.
 
 Smart protocol detection: peep handles HTTPS, SMTP, RDP, LDAP,
@@ -75,13 +74,17 @@ Use --examples on any command for detailed usage examples with jq queries:
   peep find-certs --examples    Show cert discovery examples
   peep docs --examples          Show examples for the docs browser`,
 	Args: cobra.MaximumNArgs(1),
+	PersistentPreRun: func(cmd *cobra.Command, args []string) {
+		if flagPlainText {
+			ui.EnablePlainText()
+		}
+	},
 	RunE: runPeep,
 }
 
 func init() {
-	// -P / --proto / --lens
-	rootCmd.PersistentFlags().StringVarP(&flagProto, "proto", "P", "", "Force protocol: tls, smtp, rdp, ldap, ftp, pop3, imap, mssql, mysql, postgres, xmpp (alias: --lens)")
-	rootCmd.PersistentFlags().StringVar(&flagProto, "lens", "", "Force protocol (alias for --proto)")
+	// -P / --proto
+	rootCmd.PersistentFlags().StringVarP(&flagProto, "proto", "P", "", "Force protocol: tls, smtp, rdp, ldap, ftp, pop3, imap, mssql, mysql, postgres, xmpp")
 
 	// -t / --timeout / --blink
 	rootCmd.PersistentFlags().IntVarP(&flagTimeout, "timeout", "t", 5, "Connection timeout in seconds (alias: --blink)")
@@ -102,9 +105,8 @@ func init() {
 	rootCmd.PersistentFlags().BoolVarP(&flagVerbose, "verbose", "v", false, "Show PEM encoded certs and raw x509 output (alias: --stare)")
 	rootCmd.PersistentFlags().BoolVar(&flagVerbose, "stare", false, "Show PEM + raw x509 output (alias for --verbose)")
 
-	// -d / --details / --gaze (cert detail cards)
-	rootCmd.PersistentFlags().BoolVarP(&flagDetails, "details", "d", false, "Show detailed cert info cards (alias: --gaze)")
-	rootCmd.PersistentFlags().BoolVar(&flagDetails, "gaze", false, "Show detailed cert info cards (alias for --details)")
+	// -d / --details (cert detail cards)
+	rootCmd.PersistentFlags().BoolVarP(&flagDetails, "details", "d", false, "Show detailed cert info cards")
 
 	// -e / --explain / --whytho
 	rootCmd.PersistentFlags().BoolVarP(&flagExplain, "explain", "e", false, "Explain each issue with fix recommendations (alias: --whytho)")
@@ -127,22 +129,38 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&flagCABundle, "ca-bundle", "",
 		"Path to a CA certificate bundle (.pem, .crt, .cer, .der) — replaces system trust store")
 
-	// -c / --connect / --knock
-	rootCmd.PersistentFlags().BoolVarP(&flagConnCheck, "connect", "c", false, "TCP connectivity check only — no TLS (alias: --knock)")
-	rootCmd.PersistentFlags().BoolVar(&flagConnCheck, "knock", false, "TCP connectivity check (alias for --connect)")
+	// -c / --connect
+	rootCmd.PersistentFlags().BoolVarP(&flagConnCheck, "connect", "c", false, "TCP connectivity check only — no TLS")
 
 	// --examples / --show-me
 	rootCmd.PersistentFlags().BoolVar(&flagExamples, "examples", false, "Show contextual usage examples with jq queries")
 	rootCmd.PersistentFlags().BoolVar(&flagExamples, "show-me", false, "Show usage examples (alias for --examples)")
 
 	// Hide themed aliases from help — they'll be mentioned in primary flag descriptions
-	for _, alias := range []string{"lens", "blink", "shades", "blindfold", "stare", "gaze", "whytho", "polaroid", "show-me", "knock"} {
+	for _, alias := range []string{"blink", "shades", "blindfold", "stare", "whytho", "polaroid", "show-me"} {
 		rootCmd.PersistentFlags().MarkHidden(alias)
 	}
+
+	// Ensure --help output honors -p / --plain-text / --shades with strict 7-bit ASCII
+	origHelp := rootCmd.HelpFunc()
+	rootCmd.SetHelpFunc(func(cmd *cobra.Command, args []string) {
+		if flagPlainText {
+			ui.EnablePlainText()
+			var buf strings.Builder
+			origOut := cmd.OutOrStdout()
+			cmd.SetOut(&buf)
+			origHelp(cmd, args)
+			cmd.SetOut(origOut)
+			fmt.Fprint(origOut, ui.StripEmoji(buf.String()))
+			return
+		}
+		origHelp(cmd, args)
+	})
 }
 
 // Execute runs the root command.
 func Execute() error {
+	updater.CleanupOldBinary()
 	preprocessSaveArgs()
 
 	// Start background update check (non-blocking)
@@ -296,8 +314,8 @@ func runPeep(cmd *cobra.Command, args []string) error {
 			fmt.Printf(`{"error": %q}`, err.Error())
 			fmt.Println()
 		} else {
-			fmt.Println(ui.Theme.ErrorStyle.Render(fmt.Sprintf("\n[FAIL] Failed to connect: %s", err)))
-			fmt.Println(ui.Theme.MutedStyle.Render("       Maybe try checking if the server is actually running? Just a thought."))
+			fmt.Println(ui.StripEmoji(ui.Theme.ErrorStyle.Render(fmt.Sprintf("\n[FAIL] Failed to connect: %s", err))))
+			fmt.Println(ui.StripEmoji(ui.Theme.MutedStyle.Render("       Maybe try checking if the server is actually running? Just a thought.")))
 		}
 		return nil
 	}
@@ -341,23 +359,11 @@ func runPeep(cmd *cobra.Command, args []string) error {
 	// Save certs if requested
 	if isSaveRequested(cmd) {
 		if err := saveCerts(chain, host, flagSave); err != nil {
-			fmt.Println(ui.Theme.ErrorStyle.Render(fmt.Sprintf("\n[FAIL] Save error: %s", err)))
+			fmt.Println(ui.StripEmoji(ui.Theme.ErrorStyle.Render(fmt.Sprintf("\n[FAIL] Save error: %s", err))))
 		}
 	}
 
 	return nil
-}
-
-func parseTarget(target string) (string, string) {
-	target = strings.TrimPrefix(target, "https://")
-	target = strings.TrimPrefix(target, "http://")
-	target = strings.TrimSuffix(target, "/")
-
-	host, port, err := net.SplitHostPort(target)
-	if err != nil {
-		return target, "443"
-	}
-	return host, port
 }
 
 func worstOverall(report *analyzer.DiagnosticReport) analyzer.HealthStatus {
@@ -399,7 +405,7 @@ func renderReport(report *analyzer.DiagnosticReport) {
 		report,
 	))
 
-	// -d / --details / --gaze: Show detailed cert cards
+	// -d / --details: Show detailed cert cards
 	if flagDetails {
 		for _, cert := range report.Chain.Certificates {
 			fmt.Println(ui.RenderCertCard(cert))
@@ -431,7 +437,7 @@ func renderReport(report *analyzer.DiagnosticReport) {
 		renderRawX509(report.Chain)
 	}
 
-	// -r / --raw / --ogle: Show raw x509 text output (standalone, without PEM)
+	// -r / --raw: Show raw x509 text output (standalone, without PEM)
 	if flagRaw && !flagVerbose {
 		renderRawX509(report.Chain)
 	}
@@ -446,7 +452,7 @@ func renderReport(report *analyzer.DiagnosticReport) {
 	if flagExplain {
 		duration += ui.Theme.MutedStyle.Render(fmt.Sprintf(" — %s", ui.RandomScanComment()))
 	}
-	fmt.Println(ui.Theme.MutedStyle.Render(duration))
+	fmt.Println(ui.StripEmoji(ui.Theme.MutedStyle.Render(duration)))
 }
 
 func renderJSON(report *analyzer.DiagnosticReport) error {
@@ -457,17 +463,24 @@ func renderJSON(report *analyzer.DiagnosticReport) error {
 		PEM             string `json:"pem,omitempty"`
 	}
 
-	// JSON chain with enriched certs
+	// JSON chain with enriched certs (parity with analyzer.ChainAnalysis)
 	type jsonChain struct {
-		Certificates                []jsonCert           `json:"certificates"`
-		ChainLength                 int                  `json:"chain_length"`
-		HasMissingIntermediate      bool                 `json:"has_missing_intermediate"`
-		HasUnnecessaryRoot          bool                 `json:"has_unnecessary_root"`
-		LeafOnlyMissingIntermediate bool                 `json:"leaf_only_missing_intermediate"`
-		NoIssuingCAInResponse       bool                 `json:"no_issuing_ca_in_response"`
-		ChainOrderCorrect           bool                 `json:"chain_order_correct"`
-		TrustStoreVerified          bool                 `json:"trust_store_verified"`
-		VerificationError           string               `json:"verification_error,omitempty"`
+		Certificates                []jsonCert            `json:"certificates"`
+		ChainLength                 int                   `json:"chain_length"`
+		HasMissingIntermediate      bool                  `json:"has_missing_intermediate"`
+		HasWrongIntermediate        bool                  `json:"has_wrong_intermediate"`
+		HasUnnecessaryRoot          bool                  `json:"has_unnecessary_root"`
+		LeafOnlyMissingIntermediate bool                  `json:"leaf_only_missing_intermediate"`
+		NoIssuingCAInResponse       bool                  `json:"no_issuing_ca_in_response"`
+		ChainOrderCorrect           bool                  `json:"chain_order_correct"`
+		TrustStoreVerified          bool                  `json:"trust_store_verified"`
+		VerificationError           string                `json:"verification_error,omitempty"`
+		TrustedRootName             string                `json:"trusted_root_name,omitempty"`
+		TrustedRootSerial           string                `json:"trusted_root_serial,omitempty"`
+		TrustedRootFingerprint      string                `json:"trusted_root_fingerprint,omitempty"`
+		CustomTrustStore            bool                  `json:"custom_trust_store,omitempty"`
+		CustomTrustStorePath        string                `json:"custom_trust_store_path,omitempty"`
+		SystemCAStorePath           string                `json:"system_ca_store_path,omitempty"`
 		OverallGrade                analyzer.HealthStatus `json:"overall_grade"`
 	}
 
@@ -510,12 +523,19 @@ func renderJSON(report *analyzer.DiagnosticReport) error {
 		Certificates:                certs,
 		ChainLength:                 report.Chain.ChainLength,
 		HasMissingIntermediate:      report.Chain.HasMissingIntermediate,
+		HasWrongIntermediate:        report.Chain.HasWrongIntermediate,
 		HasUnnecessaryRoot:          report.Chain.HasUnnecessaryRoot,
 		LeafOnlyMissingIntermediate: report.Chain.LeafOnlyMissingIntermediate,
 		NoIssuingCAInResponse:       report.Chain.NoIssuingCAInResponse,
 		ChainOrderCorrect:           report.Chain.ChainOrderCorrect,
 		TrustStoreVerified:          report.Chain.TrustStoreVerified,
 		VerificationError:           report.Chain.VerificationError,
+		TrustedRootName:             report.Chain.TrustedRootName,
+		TrustedRootSerial:           report.Chain.TrustedRootSerial,
+		TrustedRootFingerprint:      report.Chain.TrustedRootFingerprint,
+		CustomTrustStore:            report.Chain.CustomTrustStore,
+		CustomTrustStorePath:        report.Chain.CustomTrustStorePath,
+		SystemCAStorePath:           report.Chain.SystemCAStorePath,
 		OverallGrade:                report.Chain.OverallGrade,
 	}
 	// Warnings: strip explain/fix/doc_ref unless --explain is set

@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
 	"github.com/thexsa/peep/internal/analyzer"
 )
 
@@ -136,7 +135,9 @@ func RenderCRLResult(result analyzer.CRLResult) string {
 		lines = append(lines, renderKV("", Theme.MutedStyle.Render(
 			"To check manually from a domain-joined machine:")))
 		lines = append(lines, renderKV("", Theme.MutedStyle.Render(
-			"  "+analyzer.LDAPSearchCommand(result.LDAPEndpoint))))
+			"  Unix (OpenLDAP):  "+analyzer.LDAPSearchCommand(result.LDAPEndpoint))))
+		lines = append(lines, renderKV("", Theme.MutedStyle.Render(
+			"  Windows (AD):     "+analyzer.WindowsCRLCommand(result.LDAPEndpoint))))
 		lines = append(lines, renderKV("", Theme.MutedStyle.Render(PickSass(crlFetchFailSayings))))
 		return ApplyBorder(lines, SectionBorder) + "\n"
 	}
@@ -154,7 +155,9 @@ func RenderCRLResult(result analyzer.CRLResult) string {
 			lines = append(lines, "")
 			lines = append(lines, renderKV("LDAP CRL", Theme.MutedStyle.Render("Also available via LDAP (not fetchable):")))
 			lines = append(lines, renderKV("", Theme.MutedStyle.Render(
-				"  "+analyzer.LDAPSearchCommand(result.SkippedLDAP[0]))))
+				"  Unix (OpenLDAP):  "+analyzer.LDAPSearchCommand(result.SkippedLDAP[0]))))
+			lines = append(lines, renderKV("", Theme.MutedStyle.Render(
+				"  Windows (AD):     "+analyzer.WindowsCRLCommand(result.SkippedLDAP[0]))))
 		}
 		return ApplyBorder(lines, SectionBorder) + "\n"
 	}
@@ -246,15 +249,14 @@ func RenderCAOriginEvidence(result analyzer.CAOriginResult) string {
 	lines = append(lines, "")
 
 	// Assessment with color
-	purpleStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#C084FC"))
 	assessStyle := Theme.MutedStyle.Render
 	switch result.Assessment {
 	case "public_ca":
 		assessStyle = Theme.SuccessStyle.Render
 	case "very_likely_private_ca", "likely_private_ca":
-		assessStyle = purpleStyle.Render
+		assessStyle = Theme.PurpleStyle.Render
 	case "possibly_private_ca":
-		assessStyle = purpleStyle.Render
+		assessStyle = Theme.PurpleStyle.Render
 	}
 
 	label := formatAssessment(result.Assessment)
@@ -316,7 +318,6 @@ var caOriginMaybeSayings = []string{
 	"Hard to say definitively. If this is an enterprise cert, --internal-ca will adjust the grading.",
 	"Inconclusive origin. Use --internal-ca if you know the CA, or investigate the chain.",
 }
-
 
 // --- Cipher sass pools ---
 

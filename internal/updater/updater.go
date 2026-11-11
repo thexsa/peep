@@ -50,6 +50,24 @@ type UpdateInfo struct {
 	ReleaseURL      string        `json:"release_url"`
 	InstallMethod   InstallMethod `json:"install_method"`
 	Force           bool          `json:"-"` // when true, reinstall even if same version
+	InstalledPath   string        `json:"-"` // resolved path of the updated binary for post-update exec
+}
+
+// CleanupOldBinary removes any leftover <executable>.old file left behind from
+// a previous Windows self-update (Windows allows renaming a running .exe, but
+// locks deletion until the old process exits).
+func CleanupOldBinary() {
+	if runtime.GOOS != "windows" {
+		return
+	}
+	execPath, err := os.Executable()
+	if err != nil {
+		return
+	}
+	if strings.HasSuffix(strings.ToLower(execPath), ".old") {
+		return
+	}
+	_ = os.Remove(execPath + ".old")
 }
 
 // githubRelease is the subset of the GitHub API response we need.
@@ -149,7 +167,13 @@ func DetectInstallMethod(currentVersion string) InstallMethod {
 func PerformUpdate(info *UpdateInfo) error {
 	switch info.InstallMethod {
 	case InstallHomebrew:
-		return updateViaHomebrew(info.Force)
+		if err := updateViaHomebrew(info.Force); err != nil {
+			return err
+		}
+		if p, err := exec.LookPath("peep"); err == nil {
+			info.InstalledPath = p
+		}
+		return nil
 	case InstallGitHubBinary:
 		return updateViaGitHub(info)
 	case InstallDevBuild:
@@ -253,6 +277,7 @@ func updateViaGitHub(info *UpdateInfo) error {
 		}
 	}
 
+	info.InstalledPath = execPath
 	return nil
 }
 

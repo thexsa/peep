@@ -28,6 +28,10 @@ func showExamples(cmdName string) bool {
 		return false
 	}
 
+	if flagPlainText {
+		ui.EnablePlainText()
+	}
+
 	es := getExamples(cmdName)
 	renderExamples(es)
 	return true
@@ -47,6 +51,8 @@ func getExamples(cmdName string) exampleSet {
 		return updateExamples()
 	case "version":
 		return versionExamples()
+	case "completion":
+		return completionExamples()
 	default:
 		return rootExamples()
 	}
@@ -73,8 +79,16 @@ func rootExamples() exampleSet {
 				command:     "peep mail.company.com:587",
 			},
 			{
+				description: "Check an IPv6 endpoint:",
+				command:     "peep \"[2607:f8b0:4005:801::200e]:443\"",
+			},
+			{
 				description: "Get detailed cert cards and explanations for every finding:",
 				command:     "peep your.endpoint.com --whytho --details",
+			},
+			{
+				description: "Clean 7-bit ASCII output (no color, no emoji) for tickets, CI logs, or cmd.exe:",
+				command:     "peep your.endpoint.com -p --whytho",
 			},
 			{
 				description: "Full verbose output with PEM certs and explanations:",
@@ -91,6 +105,10 @@ func rootExamples() exampleSet {
 			{
 				description: "Extract expiration info for all certs in the chain:",
 				command:     "peep your.domain.com --json | jq '.chain.certificates[] | {subject, days_remaining, not_after}'",
+			},
+			{
+				description: "Check whether the leaf cert is missing SANs or relying on CN-only fallback:",
+				command:     "peep your.domain.com --json | jq '.chain.certificates[0] | {common_name, dns_names, missing_sans, cn_only_match}'",
 			},
 			{
 				description: "Extract just the leaf certificate PEM (requires -v):",
@@ -129,16 +147,20 @@ func scanExamples() exampleSet {
 				command:     "peep scan your.endpoint.com --whytho",
 			},
 			{
+				description: "Protocol-aware deep scan (ciphers & TLS versions over SMTP STARTTLS or RDP):",
+				command:     "peep scan mail.company.com:587",
+			},
+			{
 				description: "Scan an internal server with a custom CA bundle:",
 				command:     "peep scan internal.corp.local --internal-ca --ca-bundle /path/to/ca.pem",
 			},
 			{
 				description: "Output as JSON and extract supported cipher suites:",
-				command:     "peep scan your.domain.com --json | jq '.cipher_enum.supported_suites[] | .name'",
+				command:     "peep scan your.domain.com --json | jq '.ciphers.supported_suites[] | .name'",
 			},
 			{
 				description: "Check which TLS versions the server supports:",
-				command:     "peep scan your.domain.com --json | jq '.tls_versions'",
+				command:     "peep scan your.domain.com --json | jq '.ciphers.tls_versions'",
 			},
 			{
 				description: "Get OCSP and CRL revocation status:",
@@ -261,7 +283,7 @@ func renderExamples(es exampleSet) {
 		b.WriteString("\n")
 	}
 
-	fmt.Println(b.String())
+	fmt.Println(ui.StripEmoji(b.String()))
 }
 
 // ─────────────────────────────────────────────
@@ -319,6 +341,34 @@ func findCertsExamples() exampleSet {
 			{
 				description: "JSON — show ports with self-signed certs:",
 				command:     "peep find-certs -j example.com | jq '.certificates[] | select(.is_self_signed) | .port'",
+			},
+			{
+				description: "JSON — find certs missing SANs or relying on deprecated CN-only fallback:",
+				command:     "peep find-certs -j example.com | jq '.certificates[] | select(.missing_sans or .cn_only_match)'",
+			},
+		},
+	}
+}
+
+// ─────────────────────────────────────────────
+// Completion: peep completion
+// ─────────────────────────────────────────────
+func completionExamples() exampleSet {
+	return exampleSet{
+		heading: "peep completion — Shell Tab-Completion",
+		jqTip:   false,
+		examples: []example{
+			{
+				description: "Auto-detect your shell (zsh, bash, fish, PowerShell, Git Bash) and install:",
+				command:     "peep completion --install",
+			},
+			{
+				description: "Install completions for a specific shell explicitly:",
+				command:     "peep completion powershell --install",
+			},
+			{
+				description: "Print the completion script to stdout for manual setup:",
+				command:     "peep completion zsh",
 			},
 		},
 	}

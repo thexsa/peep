@@ -1,9 +1,12 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
+	"runtime"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -23,9 +26,9 @@ var updateCmd = &cobra.Command{
 	Long: `Check for and install the latest version of peep.
 
 Automatically detects your install method:
-  • Homebrew: runs brew upgrade thexsa/tap/peep
-  • GitHub binary: downloads the latest release and replaces in-place
-  • Dev build: tells you to git pull && make build
+  - Homebrew: runs brew upgrade thexsa/tap/peep
+  - GitHub binary: downloads the latest release and replaces in-place
+  - Dev build: tells you to git pull && make build
 
 Examples:
   peep update              Update to latest
@@ -40,6 +43,21 @@ func init() {
 	rootCmd.AddCommand(updateCmd)
 }
 
+func printUpdateLine(s string) {
+	fmt.Println(ui.StripEmoji(s))
+}
+
+func isPermissionError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, os.ErrPermission) || os.IsPermission(err) {
+		return true
+	}
+	lower := strings.ToLower(err.Error())
+	return strings.Contains(lower, "permission denied") || strings.Contains(lower, "access is denied")
+}
+
 func runUpdate(cmd *cobra.Command, args []string) error {
 	if showExamples(cmd.Name()) {
 		return nil
@@ -50,12 +68,12 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Println()
-	fmt.Println(ui.Theme.BoldStyle.Render("  Checking for updates..."))
+	printUpdateLine(ui.Theme.BoldStyle.Render("  Checking for updates..."))
 	fmt.Println()
 
 	info, err := updater.CheckForUpdate(Version)
 	if err != nil {
-		fmt.Println(ui.Theme.ErrorStyle.Render(fmt.Sprintf("  [FAIL] Could not check for updates: %s", err)))
+		printUpdateLine(ui.Theme.ErrorStyle.Render(fmt.Sprintf("  [FAIL] Could not check for updates: %s", err)))
 		return nil
 	}
 
@@ -64,16 +82,16 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 
 	method := info.InstallMethod
 
-	fmt.Println(ui.Theme.MutedStyle.Render(fmt.Sprintf("  Current version:  %s", versionDisplay(info.CurrentVersion))))
-	fmt.Println(ui.Theme.MutedStyle.Render(fmt.Sprintf("  Latest version:   %s", versionDisplay(info.LatestVersion))))
-	fmt.Println(ui.Theme.MutedStyle.Render(fmt.Sprintf("  Install method:   %s", method)))
+	printUpdateLine(ui.Theme.MutedStyle.Render(fmt.Sprintf("  Current version:  %s", versionDisplay(info.CurrentVersion))))
+	printUpdateLine(ui.Theme.MutedStyle.Render(fmt.Sprintf("  Latest version:   %s", versionDisplay(info.LatestVersion))))
+	printUpdateLine(ui.Theme.MutedStyle.Render(fmt.Sprintf("  Install method:   %s", method)))
 	fmt.Println()
 
 	if !info.UpdateAvailable && !flagUpdateForce {
-		fmt.Println(ui.Theme.SuccessStyle.Render(
+		printUpdateLine(ui.Theme.SuccessStyle.Render(
 			fmt.Sprintf("  You're already on the latest version (%s). Nothing to do.", versionDisplay(info.CurrentVersion)),
 		))
-		fmt.Println(ui.Theme.MutedStyle.Render("  Your TLS game remains strong. 💪"))
+		printUpdateLine(ui.Theme.MutedStyle.Render("  Your TLS game remains strong. 💪"))
 		fmt.Println()
 		return nil
 	}
@@ -81,14 +99,14 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 	if flagUpdateCheck {
 		// Just report, don't install
 		if info.UpdateAvailable {
-			fmt.Println(ui.RenderUpdateNotification(info.CurrentVersion, info.LatestVersion))
+			fmt.Print(ui.RenderUpdateNotification(info.CurrentVersion, info.LatestVersion))
 		}
 		return nil
 	}
 
 	if method == updater.InstallDevBuild {
-		fmt.Println(ui.Theme.WarningStyle.Render("  Dev build detected — can't self-update."))
-		fmt.Println(ui.Theme.MutedStyle.Render("  Update from source: git pull && make build"))
+		printUpdateLine(ui.Theme.WarningStyle.Render("  Dev build detected — can't self-update."))
+		printUpdateLine(ui.Theme.MutedStyle.Render("  Update from source: git pull && make build"))
 		fmt.Println()
 		return nil
 	}
@@ -103,21 +121,28 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 			updateVerb = "Running brew upgrade"
 		}
 	}
-	fmt.Println(ui.Theme.MutedStyle.Render(fmt.Sprintf("  %s...", updateVerb)))
+	printUpdateLine(ui.Theme.MutedStyle.Render(fmt.Sprintf("  %s...", updateVerb)))
 	fmt.Println()
 
 	if err := updater.PerformUpdate(info); err != nil {
-		fmt.Println(ui.Theme.ErrorStyle.Render(fmt.Sprintf("  [FAIL] Update failed: %s", err)))
+		printUpdateLine(ui.Theme.ErrorStyle.Render(fmt.Sprintf("  [FAIL] Update failed: %s", err)))
+		if isPermissionError(err) {
+			if runtime.GOOS == "windows" {
+				printUpdateLine(ui.Theme.WarningStyle.Render("  Tip: Open PowerShell or Command Prompt as Administrator, then run: peep update"))
+			} else {
+				printUpdateLine(ui.Theme.WarningStyle.Render("  Tip: Permission denied in install directory — try: sudo peep update"))
+			}
+		}
 		fmt.Println()
 		if method == updater.InstallGitHubBinary {
-			fmt.Println(ui.Theme.MutedStyle.Render("  You can update manually by downloading from:"))
-			fmt.Println(ui.Theme.MutedStyle.Render(fmt.Sprintf("  %s", info.ReleaseURL)))
+			printUpdateLine(ui.Theme.MutedStyle.Render("  You can update manually by downloading from:"))
+			printUpdateLine(ui.Theme.MutedStyle.Render(fmt.Sprintf("  %s", info.ReleaseURL)))
 		}
 		fmt.Println()
 		return nil
 	}
 
-	fmt.Println(ui.Theme.SuccessStyle.Render(
+	printUpdateLine(ui.Theme.SuccessStyle.Render(
 		fmt.Sprintf("  Updated peep to %s! 🎉", versionDisplay(info.LatestVersion)),
 	))
 	fmt.Println()
@@ -125,11 +150,21 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 	// Suppress the stale "Update available" notification from the background check
 	updateJustFinished = true
 
-	// Exec the NEW binary to show its own What's New blurb.
-	// The running process is still the old binary, so we need the new one to render
-	// its own release notes (it has the releaseNotes map for its version).
-	if binPath, err := os.Executable(); err == nil {
-		whatsNew := exec.Command(binPath, "whatsnew", info.LatestVersion)
+	// Exec the NEW binary (resolved before rename/unlink so Windows doesn't run
+	// peep.exe.old and Linux doesn't fail on "/proc/self/exe (deleted)") to show
+	// its own What's New blurb.
+	binPath := info.InstalledPath
+	if binPath == "" {
+		if exe, exeErr := os.Executable(); exeErr == nil {
+			binPath = exe
+		}
+	}
+	if binPath != "" {
+		wnArgs := []string{"whatsnew", info.LatestVersion}
+		if flagPlainText {
+			wnArgs = append(wnArgs, "--plain-text")
+		}
+		whatsNew := exec.Command(binPath, wnArgs...)
 		whatsNew.Stdout = os.Stdout
 		whatsNew.Stderr = os.Stderr
 		_ = whatsNew.Run() // best-effort, don't fail the update if this errors

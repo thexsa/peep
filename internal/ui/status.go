@@ -2,7 +2,6 @@ package ui
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/thexsa/peep/internal/analyzer"
 )
@@ -124,7 +123,7 @@ func RenderDualVerdict(v analyzer.DualVerdict) string {
 		}
 	}
 
-	return "\n" + Theme.SectionStyle.Render(fmt.Sprintf("%s", strings.Join(lines, "\n"))) + "\n"
+	return "\n" + ApplyBorder(lines, SectionBorder) + "\n"
 }
 
 // isUnnecessaryRootOnly returns true when the ONLY divergence between browser

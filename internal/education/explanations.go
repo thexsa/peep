@@ -55,11 +55,11 @@ var BrowserSafeWarningCodes = map[string]bool{
 	"CHAIN_UNNECESSARY_ROOT": true, // Browsers ignore extra root certs
 
 	// OCSP — browsers soft-fail by default
-	"OCSP_STAPLE_MISSING":  true, // Browsers do their own OCSP or skip it
-	"OCSP_STAPLE_STALE":    true, // Browsers soft-fail stale staples
-	"OCSP_UNKNOWN":         true, // Browsers soft-fail "unknown" responses
-	"OCSP_ERROR":           true, // Browsers soft-fail OCSP errors
-	"OCSP_NETWORK_ERROR":   true, // Already info — scanner network issue
+	"OCSP_STAPLE_MISSING": true, // Browsers do their own OCSP or skip it
+	"OCSP_STAPLE_STALE":   true, // Browsers soft-fail stale staples
+	"OCSP_UNKNOWN":        true, // Browsers soft-fail "unknown" responses
+	"OCSP_ERROR":          true, // Browsers soft-fail OCSP errors
+	"OCSP_NETWORK_ERROR":  true, // Already info — scanner network issue
 
 	// CRL — browsers use CRLite/CRLSets, don't fetch CRLs live
 	"CRL_STALE":         true,
@@ -67,11 +67,11 @@ var BrowserSafeWarningCodes = map[string]bool{
 	"CRL_NETWORK_ERROR": true, // Already info — scanner network issue
 
 	// CT — Chrome uses its own CT infra; missing SCTs alone don't block
-	"CT_NO_SCTS":    true,
+	"CT_NO_SCTS":     true,
 	"CT_PARSE_ERROR": true,
 
 	// Validity period — browsers warn but don't block on long validity
-	"CERT_LONG_VALIDITY": true,
+	"CERT_LONG_VALIDITY":   true,
 	"CERT_VALIDITY_PERIOD": true,
 }
 
@@ -79,9 +79,9 @@ var BrowserSafeWarningCodes = map[string]bool{
 // These are suppressed when the CA origin detection determines the CA is private/internal.
 // Private CAs don't submit to CT logs and aren't bound by CA/B Forum validity limits.
 var PublicCAOnlyWarningCodes = map[string]bool{
-	"CT_NO_SCTS":         true, // Private CAs don't participate in CT
-	"CT_PARSE_ERROR":     true, // SCTs are a public CA concept
-	"CERT_LONG_VALIDITY": true, // CA/B Forum 398-day limit is for public CAs only
+	"CT_NO_SCTS":           true, // Private CAs don't participate in CT
+	"CT_PARSE_ERROR":       true, // SCTs are a public CA concept
+	"CERT_LONG_VALIDITY":   true, // CA/B Forum 398-day limit is for public CAs only
 	"CERT_VALIDITY_PERIOD": true, // Same — internal certs commonly have longer validity
 }
 
@@ -153,6 +153,7 @@ func EvaluateBrowserVerdict(baseGrade analyzer.HealthStatus, warnings []analyzer
 	}
 	return status
 }
+
 // BuildWarnings examines a diagnostic report and generates contextual warnings.
 // When internalCA is true, checks that only apply to publicly-trusted certificates
 // (like the 398-day validity cap) are skipped.
@@ -297,17 +298,50 @@ func checkCert(cert analyzer.CertAnalysis) []analyzer.Warning {
 		})
 	}
 
-	if cert.Role == analyzer.RoleLeaf && !cert.HostnameMatch {
-		w = append(w, analyzer.Warning{
-			Code:     "CERT_HOSTNAME_MISMATCH",
-			Severity: analyzer.WrittenInCrayon,
-			Title:    "Hostname Mismatch",
-			Detail:   "The certificate does not cover the hostname you connected to.",
-			Why:      pick(hostnameMismatchSayings),
-			Explain:  "The hostname you connected to is not listed in the certificate's Subject Alternative Names (SANs). Browsers and applications verify that the cert covers the exact hostname — if it doesn't match, the connection is rejected. This usually means the wrong cert is installed, or the cert was issued for a different domain.",
-			Fix:      "Check the SANs on the certificate (shown in -v output). Either: (1) install the correct certificate that covers this hostname, (2) reissue the cert to include this hostname as a SAN, or (3) verify you're connecting to the right server.",
-			DocRef:   "peep docs troubleshooting",
-		})
+	if cert.Role == analyzer.RoleLeaf {
+		switch {
+		case cert.MissingSANs:
+			title := "Missing Subject Alternative Names (SANs)"
+			detail := "This certificate has NO Subject Alternative Name (SAN) extension and no Common Name — it is not valid for any hostname or IP address."
+			if cert.CNOnlyMatch {
+				title = "Missing Subject Alternative Names (CN-Only Fallback)"
+				detail = fmt.Sprintf("This certificate has NO Subject Alternative Name (SAN) extension and relies solely on its deprecated Common Name (%s).", cert.CommonName)
+			} else if cert.CommonName != "" {
+				detail = fmt.Sprintf("This certificate has NO Subject Alternative Name (SAN) extension (Common Name %q is ignored by modern TLS clients and does not match anyway).", cert.CommonName)
+			}
+			w = append(w, analyzer.Warning{
+				Code:     "CERT_MISSING_SANS",
+				Severity: analyzer.WrittenInCrayon,
+				Title:    title,
+				Detail:   detail,
+				Why:      pick(MissingSANSayings),
+				Explain:  "RFC 2818 deprecated matching hostnames against the Subject Common Name (CN) in May 2000, and the CA/Browser Forum banned CN-only certificates years ago. Chrome (since v58 in 2017), Edge, Firefox, Safari, Go (since 1.15), Rustls, and modern OpenSSL/Python/curl strictly require DNS or IP entries in the Subject Alternative Name (SAN) extension — even for internal/private CAs. While legacy OS APIs like Windows CryptoAPI may still silently fall back to CN when no SAN extension exists, modern browsers and TLS clients on all platforms will hard-fail.",
+				Fix:      "Reissue the certificate with a Subject Alternative Name (SAN) extension containing every DNS hostname (DNS:example.com) or IP address (IP:10.0.0.1) clients connect to — even if that name is already in the Common Name. With OpenSSL: openssl req -new -key server.key -subj '/CN=example.com' -addext 'subjectAltName = DNS:example.com'. Verify with: peep -d <host>",
+				DocRef:   "peep docs certs",
+			})
+		case cert.CNOnlyMatch:
+			w = append(w, analyzer.Warning{
+				Code:     "CERT_CN_ONLY",
+				Severity: analyzer.WrittenInCrayon,
+				Title:    "Hostname Only in Deprecated Common Name (Missing from SANs)",
+				Detail:   fmt.Sprintf("Target matches Common Name (%s), which is ignored because it is missing from the certificate's Subject Alternative Names.", cert.CommonName),
+				Why:      pick(MissingSANSayings),
+				Explain:  "This certificate has a Subject Alternative Name (SAN) extension, so every compliant TLS implementation (even legacy ones per RFC 6125) completely ignores the Subject Common Name (CN) field. Because the hostname or IP you connected to was placed only in CN and omitted from the SAN list, browsers and API clients treat this as a hostname mismatch and reject the connection.",
+				Fix:      "Reissue the certificate so that every required hostname or IP address — including the Common Name itself — is explicitly listed in the Subject Alternative Name (SAN) extension. Check the current SAN list with: peep -d <host> or peep -r <host>",
+				DocRef:   "peep docs certs",
+			})
+		case !cert.HostnameMatch:
+			w = append(w, analyzer.Warning{
+				Code:     "CERT_HOSTNAME_MISMATCH",
+				Severity: analyzer.WrittenInCrayon,
+				Title:    "Hostname Mismatch",
+				Detail:   "The certificate does not cover the hostname you connected to.",
+				Why:      pick(hostnameMismatchSayings),
+				Explain:  "The hostname you connected to is not listed in the certificate's Subject Alternative Names (SANs). Browsers and applications verify that the cert covers the exact hostname — if it doesn't match, the connection is rejected. This usually means the wrong cert is installed, or the cert was issued for a different domain.",
+				Fix:      "Check the SANs on the certificate (shown in default output, -d cert cards, or -r/-v raw output). Either: (1) install the correct certificate that covers this hostname, (2) reissue the cert to include this hostname as a SAN, or (3) verify you're connecting to the right server.",
+				DocRef:   "peep docs troubleshooting",
+			})
+		}
 	}
 
 	return w
@@ -353,9 +387,9 @@ func checkChain(chain analyzer.ChainAnalysis) []analyzer.Warning {
 			Title:    "Missing Intermediate Certificate",
 			Detail:   "The server did not send all required intermediate certificates.",
 			Why:      pick(missingIntermediateSayings),
-			Explain:  "The server must send the complete certificate chain: leaf cert + intermediate cert(s). Without the intermediate, clients can't build a path from your leaf cert to a trusted root CA. Some browsers (like Chrome) can fetch missing intermediates via AIA, but most applications, APIs, curl, and mobile apps cannot — they will fail.",
-			Fix:      "Download the correct intermediate certificate from your CA's website. Concatenate it with your leaf cert (leaf first, then intermediate). In nginx: ssl_certificate should contain both. In Apache: use SSLCertificateChainFile. Verify with: peep <host>",
-			DocRef:   "peep docs chain",
+			Explain:  "The server must send the complete certificate chain: leaf cert + intermediate cert(s). Without every intermediate on the wire, strict clients can't build a path from your leaf cert to a trusted root CA. Even if macOS Keychain (SecTrust) or Windows CryptoAPI silently resolves a missing link via AIA fetching or cached intermediates, Linux, Docker, curl, Go, Java, Python, and mobile/API clients cannot — they will fail.",
+			Fix:      "Download the full intermediate certificate chain from your CA's website and concatenate every intermediate with your leaf cert (leaf first, then intermediates in order). In nginx: ssl_certificate should contain the full chain. In Apache: include the full chain in SSLCertificateFile. Verify with: peep <host>",
+			DocRef:   "peep docs aia",
 		})
 	case chain.NoIssuingCAInResponse:
 		// Broadest: no issuing CA present (shouldn't fire if the above two didn't, but just in case).
@@ -405,7 +439,7 @@ func checkChain(chain analyzer.ChainAnalysis) []analyzer.Warning {
 			Detail:   "Trust store verification error: " + chain.VerificationError,
 			Why:      pick(verificationFailedSayings),
 			Explain:  "The system trust store could not verify this certificate chain. This means the chain is broken — either a cert is missing, expired, self-signed, or issued by an untrusted CA. Every client connecting to this server will see a security error. Browsers show a full-page warning. APIs get TLS errors. Automated systems fail silently or loudly.",
-			Fix:      "Check the chain: (1) Is the leaf cert expired? (2) Is the intermediate cert included? (3) Is the CA trusted by the client's OS? For self-signed certs, either replace with a CA-signed cert or add the self-signed cert to the client's trust store. For missing intermediates, add them to the server's chain. Verify with: peep -v <host>",
+			Fix:      "Check the chain: (1) Is the leaf cert expired? (2) Are all intermediate certs sent on the wire? (3) Is the Root CA trusted by the client's OS? For internal/private PKI, test against your root bundle with --ca-bundle /path/to/root.pem (or set SSL_CERT_FILE / SSL_CERT_DIR, honored across all OSes). Verify with: peep -v <host>",
 			DocRef:   "peep docs troubleshooting",
 		})
 	}
@@ -534,6 +568,39 @@ var sha1Sayings = []string{
 	"SHA-1 collisions are achievable. That means forgery is achievable. Get a new cert.",
 	"Running SHA-1 is like using a fence that people can just step over.",
 	"The SHAttered attack made this obsolete. Google it. Or don't, and keep being vulnerable.",
+}
+
+// MissingSANSayings contains sarcastic remarks specifically for leaf certificates
+// that have no Subject Alternative Names (SANs) or rely on deprecated Common Name fallback.
+var MissingSANSayings = []string{
+	"Relying on Common Name in the year of our Lord? Chrome killed CN fallback in 2017. Let it go.",
+	"Zero SANs. This cert showed up to a TLS handshake wearing a 'Hello My Name Is' sticker from 1999.",
+	"RFC 2818 deprecated Common Name matching in May 2000. That rule is old enough to have a 401(k).",
+	"Putting the hostname in CN without a SAN is like faxing your passport to TSA and hoping for PreCheck.",
+	"No SAN extension found. Did someone generate this CSR from a 2009 Stack Overflow answer with 3 upvotes?",
+	"Common Name without SANs: because nothing says 'enterprise security' like ignoring 25 years of RFCs.",
+	"Windows CryptoAPI might politely squint past a missing SAN, but Chrome, Safari, Firefox, and Go will slam the door in its face.",
+	"The Common Name is purely decorative now — like fake pockets on jeans. Put the hostname in the SANs.",
+	"A TLS cert with no SANs is just an expensive autograph. Nobody cares what the CN says anymore.",
+	"Someone ran 'openssl req' without '-addext subjectAltName' and called it a day. Classic Friday 4:55 PM energy.",
+	"Browsers stopped reading Common Name during the fidget spinner era. Catch up.",
+	"CN-only certificates: for when you miss dial-up tones, Netscape Navigator, and Y2K panic.",
+	"Your Common Name looks lovely. Too bad every modern TLS stack skips right past it looking for SANs that aren't there.",
+	"No Subject Alternative Names?! Even self-signed certs on localhost know better than this.",
+	"Relying on Common Name fallback is the PKI equivalent of paying with a personal check at a self-checkout.",
+	"The SAN list is completely empty. Much like the test plan before this cert hit production.",
+	"CA/Browser Forum banned CN-only certs over a decade ago. Even internal CAs don't have an excuse for this anymore.",
+	"It's called Subject Alternative Name, not Subject Optional Name. Add the extension.",
+	"Matching on CN alone worked great — back when flip phones were peak technology.",
+	"This cert put its whole identity in the Common Name field, the one place modern TLS refuses to look.",
+	"Zero SANs on a server certificate. Somewhere, an internal PKI template from Windows Server 2008 R2 strikes again.",
+	"Go 1.15 killed CN fallback in 2020. Chrome killed it in 2017. RFC 2818 deprecated it in 2000. Sensing a pattern?",
+	"Checking the Common Name for a hostname is like checking the White Pages for an Instagram handle.",
+	"You remembered the Common Name and forgot the SANs — that's like framing the envelope and throwing away the diploma.",
+	"Without SANs, this certificate legally covers zero hostnames. Congratulations on encrypting nothing useful.",
+	"Whoever issued this cert treated the SAN field like the terms and conditions: scrolled past without reading.",
+	"CN-only in production? Bold move betting your uptime on a deprecated X.509 field from the Clinton administration.",
+	"Modern browsers look at CN-only certs the way baristas look at someone ordering with a coupon from 2014.",
 }
 
 var hostnameMismatchSayings = []string{
@@ -697,7 +764,7 @@ func CheckCRLWarnings(crl analyzer.CRLResult) []analyzer.Warning {
 				Detail:   "Could not download or parse the CRL: " + crl.FetchError,
 				Why:      pick(crlFetchFailedSayings),
 				Explain:  "peep attempted to download the CRL from the certificate's CRL Distribution Point (CDP) but failed. Without the CRL, revocation status cannot be verified via this mechanism. The failure could be due to the CRL endpoint being down, or the CRL file being malformed. Most browsers soft-fail in this scenario (proceed without CRL checking), but this leaves a gap in revocation coverage. Critically, hard-fail clients — including Java applications (with CRL checking enabled), mTLS/mutual-TLS systems, and enterprise middleware (WebSphere, WildFly/JBoss, F5 BIG-IP) — will abort connections entirely if the CRL endpoint is unreachable. If your environment uses hard-fail revocation checking, a CRL fetch failure means a complete connection outage for all certificates issued by this CA.",
-				Fix:      "Check the CRL Distribution Point URL in the certificate's extensions. Verify the URL is reachable: curl -I <CDP-URL>. If the URL is unreachable, the CA may be having an outage. If the cert has no CDP, the CA may use OCSP only — check with: peep docs ocsp. See: peep docs crl",
+				Fix:      "Check the CRL Distribution Point URL in the certificate's extensions. Verify HTTP CDPs with: curl -I <CDP-URL> (or for Active Directory LDAP CDPs on domain-joined machines, use ldapsearch on Unix or certutil -URL \"<LDAP-URI>\" on Windows). If the URL is unreachable, the CA may be having an outage. See: peep docs crl",
 				DocRef:   "peep docs crl",
 			})
 		}
@@ -746,7 +813,7 @@ func CheckOCSPStapleWarnings(staple analyzer.OCSPStapleResult) []analyzer.Warnin
 				Detail:   "The stapled OCSP response's NextUpdate is in the past. The revocation data is outdated.",
 				Why:      pick(ocspStapleStaleSayings),
 				Explain:  "The server included an OCSP staple, but its NextUpdate timestamp has already passed. This means the stapled revocation proof is outdated. Strict clients may reject the connection because the staple is no longer considered valid. This typically happens when the server's OCSP stapling refresh mechanism is broken — the server fetched a staple once but never refreshed it. Some web servers (like nginx) cache OCSP responses and need to be configured to refresh them before they expire.",
-				Fix:      "Check your server's OCSP stapling configuration. In nginx: ssl_stapling on; ssl_stapling_verify on; and ensure the resolver directive is set. In Apache: SSLUseStapling on; SSLStaplingCache. Restart the server to force a fresh OCSP fetch. Verify the staple is fresh with: peep <host>",
+				Fix:      "Check your server's OCSP stapling configuration. In nginx: ssl_stapling on; ssl_stapling_verify on; and ensure the resolver directive is set. In Apache: SSLUseStapling on; SSLStaplingCache. Restart the server to force a fresh OCSP fetch. Verify the staple is fresh with: peep scan <host>",
 				DocRef:   "peep docs ocsp",
 			})
 		}
@@ -774,7 +841,7 @@ func CheckOCSPStapleWarnings(staple analyzer.OCSPStapleResult) []analyzer.Warnin
 				Detail:   "The server did not include a stapled OCSP response in the TLS handshake. No Must-Staple extension is present, so this is informational.",
 				Why:      pick(ocspStapleMissingSayings),
 				Explain:  "OCSP stapling allows the server to include a pre-fetched, CA-signed revocation status proof in the TLS handshake. Without it, clients must either (a) query the CA's OCSP responder directly — leaking which sites the user visits to the CA and adding latency, or (b) skip revocation checking entirely (soft-fail). OCSP stapling is the privacy-respecting, performance-friendly approach and is recommended for all TLS servers. Since this certificate does not have the Must-Staple extension, clients will still connect — but enabling stapling is a best practice.",
-				Fix:      "Enable OCSP stapling on your server. In nginx: ssl_stapling on; ssl_stapling_verify on; resolver 8.8.8.8 valid=300s;. In Apache: SSLUseStapling on; SSLStaplingCache shmcb:/tmp/stapling_cache(128000). In HAProxy: bind ... ssl crt /path/to/cert.pem ... (HAProxy staples automatically). After enabling, verify with: peep <host>",
+				Fix:      "Enable OCSP stapling on your server. In nginx: ssl_stapling on; ssl_stapling_verify on; resolver 8.8.8.8 valid=300s;. In Apache: SSLUseStapling on; SSLStaplingCache shmcb:/tmp/stapling_cache(128000). In HAProxy: bind ... ssl crt /path/to/cert.pem ... (HAProxy staples automatically). After enabling, verify with: peep scan <host>",
 				DocRef:   "peep docs ocsp",
 			})
 		}
@@ -1184,4 +1251,3 @@ var probeTlsOldSayings = []string{
 	"This version is a downgrade attack waiting to happen. Disable it.",
 	"Deprecated in 2021. Browsers killed it in 2020. Your server is running a zombie protocol.",
 }
-

@@ -11,7 +11,7 @@ import (
 // CAOriginResult holds the confidence scoring result for CA origin detection.
 type CAOriginResult struct {
 	Score      int                `json:"score"`
-	Assessment string            `json:"assessment"` // "public_ca", "very_likely_private_ca", "likely_private_ca", "possibly_private_ca", "unknown"
+	Assessment string             `json:"assessment"` // "public_ca", "very_likely_private_ca", "likely_private_ca", "possibly_private_ca", "unknown"
 	Evidence   []CAOriginEvidence `json:"evidence"`
 }
 

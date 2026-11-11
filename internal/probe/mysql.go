@@ -10,7 +10,7 @@ import (
 )
 
 // probeMySQLSSL performs a MySQL SSL negotiation to extract TLS state.
-func probeMySQLSSL(target, hostname string, timeout time.Duration) (*tls.ConnectionState, []string, error) {
+func probeMySQLSSL(target, hostname string, timeout time.Duration, customTLS *tls.Config) (*tls.ConnectionState, []string, error) {
 	var notes []string
 
 	dialer := &net.Dialer{Timeout: timeout}
@@ -107,14 +107,11 @@ func probeMySQLSSL(target, hostname string, timeout time.Duration) (*tls.Connect
 		return nil, notes, fmt.Errorf("failed to send MySQL SSL Request: %w", err)
 	}
 
-	// Clear deadline
-	conn.SetDeadline(time.Time{})
+	// Bound handshake deadline
+	_ = conn.SetDeadline(time.Now().Add(timeout))
 
 	// Upgrade to TLS
-	tlsConf := &tls.Config{
-		InsecureSkipVerify: true,
-		ServerName:         hostname,
-	}
+	tlsConf := buildTLSConfig(customTLS, hostname)
 
 	tlsConn := tls.Client(conn, tlsConf)
 	if err := tlsConn.Handshake(); err != nil {

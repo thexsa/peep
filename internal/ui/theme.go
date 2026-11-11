@@ -2,21 +2,24 @@ package ui
 
 import (
 	"os"
+	"regexp"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
 	"golang.org/x/term"
 )
 
+var ansiEscapeRe = regexp.MustCompile(`\x1b\[[0-9;?]*[a-zA-Z]`)
+
 // Theme holds all the styled renderers for the peep UI.
 var Theme = struct {
 	// Brand colors
-	Primary    lipgloss.Color
-	Success    lipgloss.Color
-	Warning    lipgloss.Color
-	Error      lipgloss.Color
-	Info       lipgloss.Color
-	Muted      lipgloss.Color
+	Primary lipgloss.Color
+	Success lipgloss.Color
+	Warning lipgloss.Color
+	Error   lipgloss.Color
+	Info    lipgloss.Color
+	Muted   lipgloss.Color
 
 	// Styled components
 	TitleStyle     lipgloss.Style
@@ -25,6 +28,7 @@ var Theme = struct {
 	WarningStyle   lipgloss.Style
 	ErrorStyle     lipgloss.Style
 	InfoStyle      lipgloss.Style
+	PurpleStyle    lipgloss.Style
 	MutedStyle     lipgloss.Style
 	BoldStyle      lipgloss.Style
 	BoxStyle       lipgloss.Style
@@ -35,12 +39,12 @@ var Theme = struct {
 	ValueStyle     lipgloss.Style
 	DimKeyStyle    lipgloss.Style
 }{
-	Primary:  lipgloss.Color("#818CF8"),
-	Success:  lipgloss.Color("#34D399"),
-	Warning:  lipgloss.Color("#FBBF24"),
-	Error:    lipgloss.Color("#FB7185"),
-	Info:     lipgloss.Color("#7DD3FC"),
-	Muted:    lipgloss.Color("#64748B"),
+	Primary: lipgloss.Color("#818CF8"),
+	Success: lipgloss.Color("#34D399"),
+	Warning: lipgloss.Color("#FBBF24"),
+	Error:   lipgloss.Color("#FB7185"),
+	Info:    lipgloss.Color("#7DD3FC"),
+	Muted:   lipgloss.Color("#64748B"),
 
 	TitleStyle: lipgloss.NewStyle().
 		Bold(true).
@@ -60,6 +64,9 @@ var Theme = struct {
 
 	InfoStyle: lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#7DD3FC")),
+
+	PurpleStyle: lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#C084FC")),
 
 	MutedStyle: lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#64748B")),
@@ -142,6 +149,7 @@ func EnablePlainText() {
 	Theme.WarningStyle = plain
 	Theme.ErrorStyle = plain
 	Theme.InfoStyle = plain
+	Theme.PurpleStyle = plain
 	Theme.MutedStyle = plain
 	Theme.BoldStyle = plain
 	Theme.BoxStyle = plain
@@ -158,25 +166,92 @@ func EnablePlainText() {
 	HeaderBorder = "|  "
 }
 
-// StripEmoji removes common emoji and Unicode decorations from text.
-// Used in --plain-text mode for clean copy/paste output.
+// IsInteractiveTTY returns true when stdout is an interactive terminal and
+// --plain-text is not active (used to suppress \r in-place progress spinners).
+func IsInteractiveTTY() bool {
+	if PlainTextMode {
+		return false
+	}
+	return term.IsTerminal(int(os.Stdout.Fd()))
+}
+
+var plainTextReplacer = strings.NewReplacer(
+	// Semantic verdict & status symbols
+	"🌐", "[Browser]",
+	"🤖", "[Service]",
+	"👉", "->",
+	"✅", "[PASS]",
+	"❌", "[FAIL]",
+	"⚠️", "[!]", "⚠", "[!]",
+	"✓", "[OK]",
+	"✗", "[FAIL]",
+	"🔒", "[ENCRYPTED]",
+	"¯\\_(ツ)_/¯", "(unknown)",
+
+	// Decorative emojis (strip adjacent single space first when used as prefix/suffix)
+	"📸 ", "", "📸", "",
+	" 💪", "", "💪", "",
+	" 🎉", "", "🎉", "",
+	"⚡ ", "", "⚡", "",
+	"💡 ", "", "💡", "",
+	"📖 ", "", "📖", "",
+	"📚 ", "", "📚", "",
+	"📜 ", "", "📜", "",
+	"📄 ", "", "📄", "",
+	"📋 ", "", "📋", "",
+	"🏛️ ", "", "🏛️", "", "🏛 ", "", "🏛", "",
+	"🔗 ", "", "🔗", "",
+	"🤝 ", "", "🤝", "",
+	"🔍 ", "", "🔍", "",
+	"🌶️ ", "", "🌶️", "", "🌶 ", "", "🌶", "",
+	"🔑 ", "", "🔑", "",
+	"👀 ", "", "👀", "",
+	"🎯 ", "", "🎯", "",
+
+	// Typography, arrows, math, punctuation
+	"→", "->", "←", "<-",
+	"—", "--", "–", "-",
+	"…", "...",
+	"•", "*",
+	"≥", ">=", "≤", "<=",
+	"×", "x",
+	"“", "\"", "”", "\"",
+	"‘", "'", "’", "'",
+
+	// Box-drawing & geometric glyphs
+	"━", "-", "─", "-", "═", "=",
+	"┃", "|", "│", "|", "║", "|",
+	"┌", "+", "┐", "+", "└", "+", "┘", "+",
+	"╔", "+", "╗", "+", "╚", "+", "╝", "+",
+	"├", "+", "┤", "+", "┬", "+", "┴", "+", "┼", "+",
+	"╠", "+", "╣", "+", "╦", "+", "╩", "+", "╬", "+",
+	"▼", "v", "▲", "^", "▶", ">", "◀", "<",
+)
+
+// StripEmoji converts emojis, Unicode box-drawing, and typographic glyphs into
+// strictly clean 7-bit ASCII when --plain-text (-p / --shades) is enabled.
+// Guarantees zero emojis, zero ANSI escape codes, and zero non-ASCII bytes so
+// legacy Windows cmd.exe (cp437/cp1252) and AIX terminals never render mojibake.
 func StripEmoji(s string) string {
 	if !PlainTextMode {
 		return s
 	}
-	replacer := strings.NewReplacer(
-		"📜", "", "📄", "", "📋", "", "🏛️", "", "🏛", "",
-		"⚠️", "[!]", "⚠", "[!]",
-		"🔗", "", "🤝", "", "⚡", "", "💡", "",
-		"📖", "", "📚", "", "🔍", "", "🔒", "[ENCRYPTED]",
-		"✅", "[PASS]", "❌", "[FAIL]",
-		"🌶️", "", "🌶", "",
-		"🔑", "", "👀", "",
-		"━", "-", "┃", "|", "│", "|",
-		"┌", "+", "┐", "+", "└", "+", "┘", "+",
-		"├", "+", "┤", "+", "─", "-",
-	)
-	return replacer.Replace(s)
+
+	// 1. Strip any stray ANSI CSI escape sequences
+	s = ansiEscapeRe.ReplaceAllString(s, "")
+
+	// 2. Apply semantic ASCII replacements
+	s = plainTextReplacer.Replace(s)
+
+	// 3. Final safety stripper: permit strictly printable 7-bit ASCII (0x20-0x7E), \n, and \t
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		if r == '\n' || r == '\t' || (r >= 0x20 && r <= 0x7E) {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }
 
 // TermWidth returns the current terminal width, defaulting to 100 if

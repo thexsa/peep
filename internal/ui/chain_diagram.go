@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/thexsa/peep/internal/analyzer"
+	"github.com/thexsa/peep/internal/education"
 )
 
 // RenderChainDiagram produces a visual chain-of-trust tree.
@@ -12,7 +13,7 @@ import (
 // verbosity: 0=normal, 1+=show root serial/fingerprint in trust store line
 func RenderChainDiagram(chain analyzer.ChainAnalysis, verbosity int) string {
 	if len(chain.Certificates) == 0 {
-		return Theme.ErrorStyle.Render("No certificates found in chain!")
+		return StripEmoji(Theme.ErrorStyle.Render("No certificates found in chain!"))
 	}
 
 	header := Theme.BoldStyle.Render("CHAIN OF TRUST")
@@ -65,6 +66,28 @@ func RenderChainDiagram(chain analyzer.ChainAnalysis, verbosity int) string {
 		lines = append(lines, "")
 		lines = append(lines, Theme.WarningStyle.Render("[WARN] Server is sending the Root CA cert — unnecessary"))
 		lines = append(lines, wrapBlock(PickSass(unnecessaryRootSayings), noteIndent, noteW, Theme.MutedStyle)...)
+	}
+
+	// Missing SANs / CN-only fallback callout on the leaf certificate
+	if len(chain.Certificates) > 0 {
+		leaf := chain.Certificates[0]
+		switch {
+		case leaf.MissingSANs && leaf.CNOnlyMatch:
+			lines = append(lines, "")
+			lines = append(lines, Theme.ErrorStyle.Render("[FAIL] Leaf certificate has NO SANs (CN-only fallback)"))
+			lines = append(lines, wrapBlock(fmt.Sprintf("This certificate puts %q in Common Name with zero Subject Alternative Names. Modern browsers, macOS, Linux, and Go reject CN-only certs outright — even when legacy Windows CryptoAPI lets them slide.", leaf.CommonName), noteIndent, noteW, Theme.MutedStyle)...)
+			lines = append(lines, wrapBlock(PickSass(education.MissingSANSayings), noteIndent, noteW, Theme.MutedStyle)...)
+		case leaf.MissingSANs:
+			lines = append(lines, "")
+			lines = append(lines, Theme.ErrorStyle.Render("[FAIL] Leaf certificate has NO Subject Alternative Names (SANs)"))
+			lines = append(lines, wrapBlock("Every TLS server certificate must include a Subject Alternative Name (SAN) extension covering its DNS names or IP addresses.", noteIndent, noteW, Theme.MutedStyle)...)
+			lines = append(lines, wrapBlock(PickSass(education.MissingSANSayings), noteIndent, noteW, Theme.MutedStyle)...)
+		case leaf.CNOnlyMatch:
+			lines = append(lines, "")
+			lines = append(lines, Theme.ErrorStyle.Render("[FAIL] Hostname only matches deprecated Common Name (missing from SANs)"))
+			lines = append(lines, wrapBlock(fmt.Sprintf("Common Name (%s) is ignored by modern TLS clients because it is omitted from the certificate's SAN extension.", leaf.CommonName), noteIndent, noteW, Theme.MutedStyle)...)
+			lines = append(lines, wrapBlock(PickSass(education.MissingSANSayings), noteIndent, noteW, Theme.MutedStyle)...)
+		}
 	}
 
 	// Trust store verification
@@ -136,19 +159,26 @@ func renderChainNode(cert analyzer.CertAnalysis, index int, isLast bool, total i
 	lines = append(lines, fmt.Sprintf("%sExpires: %s", prefix, expiryStr))
 
 	// SANs for leaf
-	if cert.Role == analyzer.RoleLeaf && len(cert.DNSNames) > 0 {
-		sans := strings.Join(cert.DNSNames, ", ")
-		sanPrefix := prefix + "Covers: "
-		// Build a continuation indent that matches the prefix length
-		contIndent := prefix + "        " // same width as "Covers: "
-		sanW := ContentWidth(len(sanPrefix))
-		wrappedSans := WrapText(sans, contIndent, sanW)
-		for i, sl := range wrappedSans {
-			if i == 0 {
-				lines = append(lines, sanPrefix+Theme.MutedStyle.Render(sl))
-			} else {
-				lines = append(lines, contIndent+Theme.MutedStyle.Render(sl))
+	if cert.Role == analyzer.RoleLeaf {
+		var sanItems []string
+		sanItems = append(sanItems, cert.DNSNames...)
+		sanItems = append(sanItems, cert.IPAddresses...)
+		if len(sanItems) > 0 {
+			sans := strings.Join(sanItems, ", ")
+			sanPrefix := prefix + "Covers: "
+			// Build a continuation indent that matches the prefix length
+			contIndent := prefix + "        " // same width as "Covers: "
+			sanW := ContentWidth(len(sanPrefix))
+			wrappedSans := WrapText(sans, contIndent, sanW)
+			for i, sl := range wrappedSans {
+				if i == 0 {
+					lines = append(lines, sanPrefix+Theme.MutedStyle.Render(sl))
+				} else {
+					lines = append(lines, contIndent+Theme.MutedStyle.Render(sl))
+				}
 			}
+		} else if cert.MissingSANs {
+			lines = append(lines, fmt.Sprintf("%sCovers: %s", prefix, Theme.ErrorStyle.Render("NONE (missing SAN extension!)")))
 		}
 	}
 
@@ -162,12 +192,21 @@ func renderChainNode(cert analyzer.CertAnalysis, index int, isLast bool, total i
 	}
 	lines = append(lines, fmt.Sprintf("%sSHA-256: %s", prefix, Theme.MutedStyle.Render(fp)))
 
-	// Self-signed / hostname mismatch
+	// Self-signed / missing SANs / hostname mismatch
 	if cert.IsSelfSigned && cert.Role == analyzer.RoleLeaf {
 		lines = append(lines, fmt.Sprintf("%s%s", prefix, Theme.WarningStyle.Render("Self-signed!")))
 	}
-	if cert.Role == analyzer.RoleLeaf && !cert.HostnameMatch {
-		lines = append(lines, fmt.Sprintf("%s%s", prefix, Theme.ErrorStyle.Render("Hostname does NOT match!")))
+	if cert.Role == analyzer.RoleLeaf {
+		switch {
+		case cert.MissingSANs && cert.CNOnlyMatch:
+			lines = append(lines, fmt.Sprintf("%s%s", prefix, Theme.ErrorStyle.Render("Relies on deprecated Common Name — NO SANs present!")))
+		case cert.MissingSANs:
+			lines = append(lines, fmt.Sprintf("%s%s", prefix, Theme.ErrorStyle.Render("Certificate has NO Subject Alternative Names (SANs)!")))
+		case cert.CNOnlyMatch:
+			lines = append(lines, fmt.Sprintf("%s%s", prefix, Theme.ErrorStyle.Render("Hostname only in deprecated CN (missing from SANs)!")))
+		case !cert.HostnameMatch:
+			lines = append(lines, fmt.Sprintf("%s%s", prefix, Theme.ErrorStyle.Render("Hostname does NOT match!")))
+		}
 	}
 
 	lines = append(lines, "")

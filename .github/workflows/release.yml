@@ -55,6 +55,9 @@ jobs:
           echo "Building windows/amd64..."
           CGO_ENABLED=0 GOOS=windows GOARCH=amd64   go build -ldflags="$LDFLAGS" -o dist/peep-windows-amd64.exe  ./cmd/peep
 
+          echo "Building windows/arm64..."
+          CGO_ENABLED=0 GOOS=windows GOARCH=arm64   go build -ldflags="$LDFLAGS" -o dist/peep-windows-arm64.exe  ./cmd/peep
+
       - name: Generate checksums
         run: |
           cd dist
@@ -74,6 +77,7 @@ jobs:
             dist/peep-linux-ppc64le
             dist/peep-aix-ppc64
             dist/peep-windows-amd64.exe
+            dist/peep-windows-arm64.exe
             dist/checksums-sha256.txt
 
       - name: Update Homebrew formula

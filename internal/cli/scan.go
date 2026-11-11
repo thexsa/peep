@@ -1,9 +1,8 @@
 package cli
 
 import (
+	"encoding/pem"
 	"fmt"
-	"net"
-	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -16,7 +15,7 @@ import (
 
 var scanCmd = &cobra.Command{
 	Use:   "scan <host>[:<port>]",
-	Short: "Deep scan — cipher enumeration, OCSP, CRL, and CT log checks",
+	Short: "Deep scan -- cipher enumeration, OCSP, CRL, and CT log checks",
 	Long: `Perform a deep scan including:
 
   - All checks from the default 'peep' command
@@ -25,20 +24,20 @@ var scanCmd = &cobra.Command{
   - CRL revocation check (fetch and parse the Certificate Revocation List)
   - Certificate Transparency verification (parse embedded SCTs)
   - Cipher suite enumeration (which ciphers does the server support?)
-  - SSL/TLS version probing (SSLv3, TLS 1.0–1.3)
+  - SSL/TLS version probing (SSLv3, TLS 1.0-1.3)
 
 CRL checks iterate all distribution points. LDAP endpoints (common with
-Microsoft AD CS) are detected and skipped — HTTP endpoints are tried instead.
+Microsoft AD CS) are detected and skipped -- HTTP endpoints are tried instead.
 If an HTTPS CRL endpoint has a TLS error, peep retries with TLS verification
 disabled and warns you (the CRL data is signature-verified against the CA).
 
 CT checks parse Signed Certificate Timestamps (SCTs) embedded directly in
-the certificate — no external API calls needed. SCTs are cryptographic proof
+the certificate -- no external API calls needed. SCTs are cryptographic proof
 that the certificate was submitted to CT logs before issuance.
 Certificates from private/internal CAs are automatically skipped.
 
-Results include dual verdicts: Browser Compatibility (lenient — browsers
-self-heal many issues) and Service/API (strict — Go, OpenSSL, Java enforce
+Results include dual verdicts: Browser Compatibility (lenient -- browsers
+self-heal many issues) and Service/API (strict -- Go, OpenSSL, Java enforce
 strict chain order and reject aggressively). Run 'peep docs verdicts' to
 learn more about the grading system.
 
@@ -73,17 +72,7 @@ func runScan(cmd *cobra.Command, args []string) error {
 
 	ui.ResetSass()
 
-	target := args[0]
-
-	target = strings.TrimPrefix(target, "https://")
-	target = strings.TrimPrefix(target, "http://")
-	target = strings.TrimSuffix(target, "/")
-
-	host, port, err := net.SplitHostPort(target)
-	if err != nil {
-		host = target
-		port = "443"
-	}
+	host, port := parseTarget(args[0])
 
 	timeout := time.Duration(flagTimeout) * time.Second
 
@@ -105,7 +94,7 @@ func runScan(cmd *cobra.Command, args []string) error {
 			fmt.Printf(`{"error": %q}`, err.Error())
 			fmt.Println()
 		} else {
-			fmt.Println(ui.Theme.ErrorStyle.Render(fmt.Sprintf("\n[FAIL] Failed to connect: %s", err)))
+			fmt.Println(ui.StripEmoji(ui.Theme.ErrorStyle.Render(fmt.Sprintf("\n[FAIL] Failed to connect: %s", err))))
 		}
 		return nil
 	}
@@ -188,10 +177,10 @@ func runScan(cmd *cobra.Command, args []string) error {
 				}
 			}
 		} else if leaf.IsSelfSigned {
-			fmt.Println(ui.Theme.MutedStyle.Render("  Skipping OCSP — self-signed cert"))
+			fmt.Println(ui.StripEmoji(ui.Theme.MutedStyle.Render("  Skipping OCSP — self-signed cert")))
 			fmt.Println()
 		} else {
-			fmt.Println(ui.Theme.MutedStyle.Render("  Skipping OCSP — no issuer cert available"))
+			fmt.Println(ui.StripEmoji(ui.Theme.MutedStyle.Render("  Skipping OCSP — no issuer cert available")))
 			fmt.Println()
 		}
 
@@ -255,9 +244,9 @@ func runScan(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Cipher suite enumeration
+	// Cipher suite enumeration (protocol-aware for STARTTLS/RDP/DB ports too)
 	fmt.Println(ui.Theme.MutedStyle.Render("  Enumerating supported cipher suites (this may take a moment)..."))
-	cipherResult := analyzer.EnumerateCiphers(host, port, timeout)
+	cipherResult := analyzer.EnumerateCiphersWithProto(host, port, result.ProbeType, timeout)
 	fmt.Println(ui.RenderCipherEnum(cipherResult))
 
 	// Collect cipher and TLS version probe warnings
@@ -269,8 +258,29 @@ func runScan(cmd *cobra.Command, args []string) error {
 		fmt.Println(ui.RenderCertCard(cert))
 	}
 
-	// -r / --raw: Show raw x509 text output
-	if flagRaw {
+	// -v / --verbose / --stare: Show PEM encoded certs + raw x509
+	if flagVerbose {
+		for _, cert := range chain.Certificates {
+			name := cert.CommonName
+			if name == "" {
+				name = cert.Subject
+			}
+			pemBlock := &pem.Block{
+				Type:  "CERTIFICATE",
+				Bytes: cert.RawCert.Raw,
+			}
+			pemData := pem.EncodeToMemory(pemBlock)
+
+			var lines []string
+			lines = append(lines, ui.Theme.BoldStyle.Render(fmt.Sprintf("PEM  %s  (%s)", name, cert.Role)))
+			lines = append(lines, ui.Theme.MutedStyle.Render(string(pemData)))
+			fmt.Println(ui.ApplyBorder(lines, ui.CardBorder))
+		}
+		renderRawX509(chain)
+	}
+
+	// -r / --raw: Show raw x509 text output (standalone, without PEM)
+	if flagRaw && !flagVerbose {
 		renderRawX509(chain)
 	}
 
@@ -289,7 +299,7 @@ func runScan(cmd *cobra.Command, args []string) error {
 	if flagExplain {
 		duration += ui.Theme.MutedStyle.Render(fmt.Sprintf(" — %s", ui.RandomScanComment()))
 	}
-	fmt.Println(ui.Theme.MutedStyle.Render(duration))
+	fmt.Println(ui.StripEmoji(ui.Theme.MutedStyle.Render(duration)))
 	fmt.Println()
 
 	fmt.Println(ui.RenderDualVerdict(verdicts))
@@ -297,7 +307,7 @@ func runScan(cmd *cobra.Command, args []string) error {
 	// Save certs if requested
 	if isSaveRequested(cmd) {
 		if err := saveCerts(chain, host, flagSave); err != nil {
-			fmt.Println(ui.Theme.ErrorStyle.Render(fmt.Sprintf("\n[FAIL] Save error: %s", err)))
+			fmt.Println(ui.StripEmoji(ui.Theme.ErrorStyle.Render(fmt.Sprintf("\n[FAIL] Save error: %s", err))))
 		}
 	}
 
@@ -367,8 +377,8 @@ func runScanJSON(cmd *cobra.Command, result *probe.ProbeResult, host, port strin
 		}
 	}
 
-	// Ciphers
-	cipherResult := analyzer.EnumerateCiphers(host, port, timeout)
+	// Ciphers (protocol-aware for STARTTLS/RDP/DB ports too)
+	cipherResult := analyzer.EnumerateCiphersWithProto(host, port, result.ProbeType, timeout)
 	report.Ciphers = &cipherResult
 	allWarnings = append(allWarnings, education.CheckCipherEnumWarnings(cipherResult)...)
 	allWarnings = append(allWarnings, education.CheckTLSVersionProbeWarnings(cipherResult)...)
@@ -408,4 +418,3 @@ func runScanJSON(cmd *cobra.Command, result *probe.ProbeResult, host, port strin
 	fmt.Println(string(data))
 	return nil
 }
-

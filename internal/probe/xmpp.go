@@ -9,7 +9,7 @@ import (
 )
 
 // probeXMPPStartTLS performs an XMPP STARTTLS upgrade to extract TLS state.
-func probeXMPPStartTLS(target, hostname string, timeout time.Duration) (*tls.ConnectionState, []string, error) {
+func probeXMPPStartTLS(target, hostname string, timeout time.Duration, customTLS *tls.Config) (*tls.ConnectionState, []string, error) {
 	var notes []string
 
 	dialer := &net.Dialer{Timeout: timeout}
@@ -87,14 +87,11 @@ func probeXMPPStartTLS(target, hostname string, timeout time.Duration) (*tls.Con
 
 	notes = append(notes, "STARTTLS <proceed> received, upgrading to TLS")
 
-	// Clear deadline
-	conn.SetDeadline(time.Time{})
+	// Bound deadline for TLS handshake
+	_ = conn.SetDeadline(time.Now().Add(timeout))
 
 	// Upgrade to TLS
-	tlsConf := &tls.Config{
-		InsecureSkipVerify: true,
-		ServerName:         hostname,
-	}
+	tlsConf := buildTLSConfig(customTLS, hostname)
 
 	tlsConn := tls.Client(conn, tlsConf)
 	if err := tlsConn.Handshake(); err != nil {

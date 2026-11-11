@@ -65,7 +65,7 @@ func renderSingleRawX509(cert analyzer.CertAnalysis) string {
 	// X509v3 Extensions
 	lines = append(lines, "")
 	lines = append(lines, ui.Theme.BoldStyle.Render("  X509v3 Extensions:"))
-	lines = append(lines, rawExtensions(raw)...)
+	lines = append(lines, rawExtensions(raw, cert.Role == analyzer.RoleLeaf)...)
 
 	return ui.ApplyBorder(lines, ui.CardBorder)
 }
@@ -122,7 +122,7 @@ func rawPublicKeyInfo(cert *x509.Certificate) []string {
 }
 
 // rawExtensions renders the x509v3 extensions section.
-func rawExtensions(cert *x509.Certificate) []string {
+func rawExtensions(cert *x509.Certificate, isLeaf bool) []string {
 	var lines []string
 	indent := "    "
 
@@ -160,7 +160,7 @@ func rawExtensions(cert *x509.Certificate) []string {
 	}
 
 	// Subject Alternative Name
-	if len(cert.DNSNames) > 0 || len(cert.IPAddresses) > 0 || len(cert.EmailAddresses) > 0 {
+	if len(cert.DNSNames) > 0 || len(cert.IPAddresses) > 0 || len(cert.EmailAddresses) > 0 || len(cert.URIs) > 0 {
 		lines = append(lines, fmt.Sprintf("%s%s", indent,
 			ui.Theme.BoldStyle.Render("X509v3 Subject Alternative Name:")))
 		var sans []string
@@ -173,6 +173,9 @@ func rawExtensions(cert *x509.Certificate) []string {
 		for _, email := range cert.EmailAddresses {
 			sans = append(sans, "email:"+email)
 		}
+		for _, uri := range cert.URIs {
+			sans = append(sans, "URI:"+uri.String())
+		}
 
 		// Word-wrap SANs
 		sanStr := strings.Join(sans, ", ")
@@ -183,6 +186,15 @@ func rawExtensions(cert *x509.Certificate) []string {
 			lines = append(lines, fmt.Sprintf("%s%s", sanIndent,
 				ui.Theme.MutedStyle.Render(line)))
 		}
+	} else if isLeaf {
+		lines = append(lines, fmt.Sprintf("%s%s", indent,
+			ui.Theme.BoldStyle.Render("X509v3 Subject Alternative Name:")))
+		lines = append(lines, fmt.Sprintf("%s  %s", indent,
+			ui.Theme.ErrorStyle.Render("(MISSING — no DNS or IP SANs present!)")))
+	}
+	if isLeaf && len(cert.DNSNames) == 0 && len(cert.IPAddresses) == 0 && (len(cert.EmailAddresses) > 0 || len(cert.URIs) > 0) {
+		lines = append(lines, fmt.Sprintf("%s  %s", indent,
+			ui.Theme.ErrorStyle.Render("(WARNING — no DNS or IP SANs present for TLS server auth!)")))
 	}
 
 	// Authority Key Identifier

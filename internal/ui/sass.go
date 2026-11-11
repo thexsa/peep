@@ -24,6 +24,17 @@ func ResetSass() {
 	globalSass.used = make(map[string]bool)
 }
 
+// MarkSassUsed records a remark as already displayed in the current render pass
+// so subsequent PickSass calls select a different remark.
+func MarkSassUsed(s string) {
+	if s == "" {
+		return
+	}
+	globalSass.mu.Lock()
+	defer globalSass.mu.Unlock()
+	globalSass.used[s] = true
+}
+
 // PickSass selects a random remark from the pool that hasn't been used
 // yet in this render pass. If all remarks in the pool have been used,
 // it resets and picks freely (better than returning nothing).

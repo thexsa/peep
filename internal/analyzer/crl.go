@@ -14,23 +14,23 @@ const maxCRLSize = 10 * 1024 * 1024 // 10 MB
 
 // CRLResult holds the result of a CRL revocation check.
 type CRLResult struct {
-	Available       bool      `json:"available"`
-	Fetched         bool      `json:"fetched"`
-	FetchError      string    `json:"fetch_error,omitempty"`
-	IsRevoked       bool      `json:"is_revoked"`
-	RevokedAt       time.Time `json:"revoked_at,omitempty"`
-	RevokeReason    string    `json:"revoke_reason,omitempty"`
-	ThisUpdate      time.Time `json:"this_update,omitempty"`
-	NextUpdate      time.Time `json:"next_update,omitempty"`
-	IsStale         bool      `json:"is_stale"`
-	CRLEndpoint     string    `json:"crl_endpoint,omitempty"`
-	CRLSize         int       `json:"crl_size"`
-	EntryCount      int       `json:"entry_count"`
-	TLSWarning      string    `json:"tls_warning,omitempty"`       // Warning when HTTPS CRL endpoint has TLS issues
-	IsLDAP          bool      `json:"is_ldap,omitempty"`           // True if the CRL endpoint is LDAP
-	LDAPEndpoint    string    `json:"ldap_endpoint,omitempty"`     // The LDAP URI for display
-	AllEndpoints    []string  `json:"all_endpoints,omitempty"`     // All CRL distribution point URIs
-	SkippedLDAP     []string  `json:"skipped_ldap,omitempty"`      // LDAP URIs that were skipped
+	Available    bool      `json:"available"`
+	Fetched      bool      `json:"fetched"`
+	FetchError   string    `json:"fetch_error,omitempty"`
+	IsRevoked    bool      `json:"is_revoked"`
+	RevokedAt    time.Time `json:"revoked_at,omitempty"`
+	RevokeReason string    `json:"revoke_reason,omitempty"`
+	ThisUpdate   time.Time `json:"this_update,omitempty"`
+	NextUpdate   time.Time `json:"next_update,omitempty"`
+	IsStale      bool      `json:"is_stale"`
+	CRLEndpoint  string    `json:"crl_endpoint,omitempty"`
+	CRLSize      int       `json:"crl_size"`
+	EntryCount   int       `json:"entry_count"`
+	TLSWarning   string    `json:"tls_warning,omitempty"`   // Warning when HTTPS CRL endpoint has TLS issues
+	IsLDAP       bool      `json:"is_ldap,omitempty"`       // True if the CRL endpoint is LDAP
+	LDAPEndpoint string    `json:"ldap_endpoint,omitempty"` // The LDAP URI for display
+	AllEndpoints []string  `json:"all_endpoints,omitempty"` // All CRL distribution point URIs
+	SkippedLDAP  []string  `json:"skipped_ldap,omitempty"`  // LDAP URIs that were skipped
 }
 
 // CheckCRL performs a CRL revocation check for the given certificate.
@@ -111,8 +111,8 @@ func fetchAndCheckCRL(cert *x509.Certificate, issuer *x509.Certificate, endpoint
 		}
 		resp, err = insecureClient.Get(endpoint)
 		if err == nil {
-			result.TLSWarning = fmt.Sprintf("CRL endpoint has a TLS error (e.g., certificate mismatch). "+
-				"CRL data was fetched by skipping TLS verification — the CRL signature was still verified against the issuing CA. "+
+			result.TLSWarning = fmt.Sprintf("CRL endpoint has a TLS error (e.g., certificate mismatch). " +
+				"CRL data was fetched by skipping TLS verification — the CRL signature was still verified against the issuing CA. " +
 				"Clients with hard-fail CRL policies may be unable to reach this endpoint.")
 		}
 	}
@@ -189,8 +189,14 @@ func isLDAPEndpoint(url string) bool {
 }
 
 // LDAPSearchCommand generates an ldapsearch command for querying a CRL
-// from an LDAP distribution point (typically Microsoft AD CS).
+// from an LDAP distribution point (typically Microsoft AD CS) on Unix/OpenLDAP.
 func LDAPSearchCommand(ldapURI string) string {
 	// The LDAP URI already contains the full query — ldapsearch can use it directly
 	return fmt.Sprintf("ldapsearch -x -H \"%s\" -s base certificateRevocationList", ldapURI)
+}
+
+// WindowsCRLCommand generates a built-in Windows certutil command for retrieving/verifying
+// an Active Directory LDAP CRL distribution point on Windows machines.
+func WindowsCRLCommand(ldapURI string) string {
+	return fmt.Sprintf("certutil -URL \"%s\"", ldapURI)
 }

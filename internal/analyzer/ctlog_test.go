@@ -181,10 +181,10 @@ func createTestCert(t *testing.T, extraExtensions []pkix.Extension) *x509.Certif
 	}
 
 	tmpl := &x509.Certificate{
-		SerialNumber: big.NewInt(1),
-		Subject:      pkix.Name{CommonName: "test.example.com"},
-		NotBefore:    time.Now().Add(-time.Hour),
-		NotAfter:     time.Now().Add(time.Hour),
+		SerialNumber:    big.NewInt(1),
+		Subject:         pkix.Name{CommonName: "test.example.com"},
+		NotBefore:       time.Now().Add(-time.Hour),
+		NotAfter:        time.Now().Add(time.Hour),
 		ExtraExtensions: extraExtensions,
 	}
 

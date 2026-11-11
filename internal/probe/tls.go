@@ -7,13 +7,10 @@ import (
 )
 
 // probeDirectTLS performs a direct TLS connection and returns the connection state.
-func probeDirectTLS(target, hostname string, timeout time.Duration) (*tls.ConnectionState, []string, error) {
+func probeDirectTLS(target, hostname string, timeout time.Duration, customTLS *tls.Config) (*tls.ConnectionState, []string, error) {
 	var notes []string
 
-	conf := &tls.Config{
-		InsecureSkipVerify: true,
-		ServerName:         hostname,
-	}
+	conf := buildTLSConfig(customTLS, hostname)
 
 	dialer := &net.Dialer{Timeout: timeout}
 	conn, err := tls.DialWithDialer(dialer, "tcp", target, conf)

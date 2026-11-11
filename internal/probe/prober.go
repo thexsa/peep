@@ -13,17 +13,35 @@ type ProbeResult struct {
 	Host       string
 	Port       string
 	IP         string
-	Protocol   string // Human-readable: "HTTPS", "SMTP/STARTTLS", "RDP", etc.
-	ProbeType  string // "direct_tls", "starttls_smtp", "rdp_x224", "starttls_ldap"
+	Protocol   string   // Human-readable: "HTTPS", "SMTP/STARTTLS", "RDP", etc.
+	ProbeType  string   // "direct_tls", "starttls_smtp", "rdp_x224", "starttls_ldap"
 	ProbeNotes []string // Any interesting observations during probing
 }
 
 // ProbeOptions configures the probe behavior.
 type ProbeOptions struct {
-	Host     string
-	Port     string
-	Timeout  time.Duration
-	Proto    string // Force protocol: "", "tls", "smtp", "rdp", "ldap"
+	Host      string
+	Port      string
+	Timeout   time.Duration
+	Proto     string      // Force protocol: "", "tls", "smtp", "rdp", "ldap", etc.
+	TLSConfig *tls.Config // Optional custom TLS configuration (e.g., for version/cipher probing)
+}
+
+// buildTLSConfig clones custom (if provided) or creates a default TLS config
+// with InsecureSkipVerify enabled and ServerName populated.
+func buildTLSConfig(custom *tls.Config, hostname string) *tls.Config {
+	if custom != nil {
+		cfg := custom.Clone()
+		cfg.InsecureSkipVerify = true
+		if cfg.ServerName == "" {
+			cfg.ServerName = hostname
+		}
+		return cfg
+	}
+	return &tls.Config{
+		InsecureSkipVerify: true,
+		ServerName:         hostname,
+	}
 }
 
 // portProtocolMap maps well-known ports to their protocol strategies.
@@ -32,9 +50,9 @@ var portProtocolMap = map[string]string{
 	"8443": "tls",
 	"587":  "smtp",
 	"25":   "smtp",
-	"465":  "tls",      // SMTPS (implicit TLS)
-	"636":  "tls",      // LDAPS (implicit TLS)
-	"389":  "ldap",     // LDAP STARTTLS
+	"465":  "tls",  // SMTPS (implicit TLS)
+	"636":  "tls",  // LDAPS (implicit TLS)
+	"389":  "ldap", // LDAP STARTTLS
 	"3389": "rdp",
 	"993":  "tls",      // IMAPS (implicit TLS)
 	"995":  "tls",      // POP3S (implicit TLS)
@@ -88,28 +106,28 @@ func Probe(opts ProbeOptions) (*ProbeResult, error) {
 
 	switch proto {
 	case "smtp":
-		state, notes, err = probeSTARTTLS(target, opts.Host, opts.Timeout)
+		state, notes, err = probeSTARTTLS(target, opts.Host, opts.Timeout, opts.TLSConfig)
 	case "rdp":
-		state, notes, err = probeRDP(target, opts.Host, opts.Timeout)
+		state, notes, err = probeRDP(target, opts.Host, opts.Timeout, opts.TLSConfig)
 	case "ldap":
-		state, notes, err = probeLDAPStartTLS(target, opts.Host, opts.Timeout)
+		state, notes, err = probeLDAPStartTLS(target, opts.Host, opts.Timeout, opts.TLSConfig)
 	case "ftp":
-		state, notes, err = probeFTPStartTLS(target, opts.Host, opts.Timeout)
+		state, notes, err = probeFTPStartTLS(target, opts.Host, opts.Timeout, opts.TLSConfig)
 	case "pop3":
-		state, notes, err = probePOP3StartTLS(target, opts.Host, opts.Timeout)
+		state, notes, err = probePOP3StartTLS(target, opts.Host, opts.Timeout, opts.TLSConfig)
 	case "imap":
-		state, notes, err = probeIMAPStartTLS(target, opts.Host, opts.Timeout)
+		state, notes, err = probeIMAPStartTLS(target, opts.Host, opts.Timeout, opts.TLSConfig)
 	case "mssql":
-		state, notes, err = probeMSSQLTLS(target, opts.Host, opts.Timeout)
+		state, notes, err = probeMSSQLTLS(target, opts.Host, opts.Timeout, opts.TLSConfig)
 	case "mysql":
-		state, notes, err = probeMySQLSSL(target, opts.Host, opts.Timeout)
+		state, notes, err = probeMySQLSSL(target, opts.Host, opts.Timeout, opts.TLSConfig)
 	case "postgres":
-		state, notes, err = probePostgresSSL(target, opts.Host, opts.Timeout)
+		state, notes, err = probePostgresSSL(target, opts.Host, opts.Timeout, opts.TLSConfig)
 	case "xmpp":
-		state, notes, err = probeXMPPStartTLS(target, opts.Host, opts.Timeout)
+		state, notes, err = probeXMPPStartTLS(target, opts.Host, opts.Timeout, opts.TLSConfig)
 	default:
 		// Default: try direct TLS
-		state, notes, err = probeDirectTLS(target, opts.Host, opts.Timeout)
+		state, notes, err = probeDirectTLS(target, opts.Host, opts.Timeout, opts.TLSConfig)
 	}
 
 	if err != nil {
@@ -130,6 +148,43 @@ func Probe(opts ProbeOptions) (*ProbeResult, error) {
 		ProbeType:  proto,
 		ProbeNotes: notes,
 	}, nil
+}
+
+// TestHandshake performs a protocol-aware TLS handshake using opts.TLSConfig
+// (without redundant DNS lookups) and returns nil if the server negotiated it.
+func TestHandshake(opts ProbeOptions) error {
+	proto := opts.Proto
+	if proto == "" {
+		proto = detectProtocol(opts.Port)
+	}
+	target := net.JoinHostPort(opts.Host, opts.Port)
+
+	var err error
+	switch proto {
+	case "smtp":
+		_, _, err = probeSTARTTLS(target, opts.Host, opts.Timeout, opts.TLSConfig)
+	case "rdp":
+		_, _, err = probeRDP(target, opts.Host, opts.Timeout, opts.TLSConfig)
+	case "ldap":
+		_, _, err = probeLDAPStartTLS(target, opts.Host, opts.Timeout, opts.TLSConfig)
+	case "ftp":
+		_, _, err = probeFTPStartTLS(target, opts.Host, opts.Timeout, opts.TLSConfig)
+	case "pop3":
+		_, _, err = probePOP3StartTLS(target, opts.Host, opts.Timeout, opts.TLSConfig)
+	case "imap":
+		_, _, err = probeIMAPStartTLS(target, opts.Host, opts.Timeout, opts.TLSConfig)
+	case "mssql":
+		_, _, err = probeMSSQLTLS(target, opts.Host, opts.Timeout, opts.TLSConfig)
+	case "mysql":
+		_, _, err = probeMySQLSSL(target, opts.Host, opts.Timeout, opts.TLSConfig)
+	case "postgres":
+		_, _, err = probePostgresSSL(target, opts.Host, opts.Timeout, opts.TLSConfig)
+	case "xmpp":
+		_, _, err = probeXMPPStartTLS(target, opts.Host, opts.Timeout, opts.TLSConfig)
+	default:
+		_, _, err = probeDirectTLS(target, opts.Host, opts.Timeout, opts.TLSConfig)
+	}
+	return err
 }
 
 // detectProtocol determines the appropriate protocol based on port number.

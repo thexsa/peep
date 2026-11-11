@@ -10,7 +10,7 @@ import (
 )
 
 // probeMSSQLTLS performs a TDS PreLogin to extract TLS state.
-func probeMSSQLTLS(target, hostname string, timeout time.Duration) (*tls.ConnectionState, []string, error) {
+func probeMSSQLTLS(target, hostname string, timeout time.Duration, customTLS *tls.Config) (*tls.ConnectionState, []string, error) {
 	var notes []string
 
 	dialer := &net.Dialer{Timeout: timeout}
@@ -104,14 +104,11 @@ func probeMSSQLTLS(target, hostname string, timeout time.Duration) (*tls.Connect
 
 	notes = append(notes, "MSSQL PreLogin successful, upgrading to TLS")
 
-	// Clear deadline for TLS handshake
-	conn.SetDeadline(time.Time{})
+	// Bound deadline for TLS handshake
+	_ = conn.SetDeadline(time.Now().Add(timeout))
 
 	// Upgrade to TLS
-	tlsConf := &tls.Config{
-		InsecureSkipVerify: true,
-		ServerName:         hostname,
-	}
+	tlsConf := buildTLSConfig(customTLS, hostname)
 
 	tlsConn := tls.Client(conn, tlsConf)
 	if err := tlsConn.Handshake(); err != nil {

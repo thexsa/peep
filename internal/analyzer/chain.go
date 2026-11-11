@@ -45,9 +45,14 @@ func AnalyzeChain(state *tls.ConnectionState, targetHost string, skipVerify bool
 	}
 
 	if !skipVerify && totalCerts > 0 {
+		var omittedWireIntermediate bool
 		analysis.TrustStoreVerified, analysis.VerificationError,
 			analysis.TrustedRootName, analysis.TrustedRootSerial,
-			analysis.TrustedRootFingerprint = verifyTrustStore(certs, targetHost, caBundlePath)
+			analysis.TrustedRootFingerprint, omittedWireIntermediate = verifyTrustStoreWithWireCheck(certs, targetHost, caBundlePath)
+		if omittedWireIntermediate && !analysis.HasWrongIntermediate {
+			analysis.HasMissingIntermediate = true
+			analysis.NoIssuingCAInResponse = true
+		}
 	}
 
 	analysis.OverallGrade = gradeChain(analysis)
@@ -136,8 +141,17 @@ func checkUnnecessaryRoot(certs []*x509.Certificate) bool {
 // verifyTrustStore checks the chain against the system trust store.
 // Returns: verified, error, rootName, rootSerial, rootFingerprint.
 func verifyTrustStore(certs []*x509.Certificate, hostname string, caBundlePath string) (bool, string, string, string, string) {
+	verified, errStr, rootName, rootSerial, rootFP, _ := verifyTrustStoreWithWireCheck(certs, hostname, caBundlePath)
+	return verified, errStr, rootName, rootSerial, rootFP
+}
+
+// verifyTrustStoreWithWireCheck checks the chain against the trust store and additionally
+// enforces that every intermediate CA in the verified path was actually presented on the
+// wire by the server (preventing macOS Security.framework or Windows CryptoAPI from
+// silently resolving missing intermediates via AIA or local OS caches).
+func verifyTrustStoreWithWireCheck(certs []*x509.Certificate, hostname string, caBundlePath string) (bool, string, string, string, string, bool) {
 	if len(certs) == 0 {
-		return false, "no certificates presented", "", "", ""
+		return false, "no certificates presented", "", "", "", false
 	}
 
 	// If the server sent only a leaf cert and it's not self-signed, the chain
@@ -146,7 +160,7 @@ func verifyTrustStore(certs []*x509.Certificate, hostname string, caBundlePath s
 	if len(certs) == 1 {
 		leaf := certs[0]
 		if leaf.Subject.String() != leaf.Issuer.String() {
-			return false, "incomplete chain: server sent only the leaf certificate, no intermediate CA", "", "", ""
+			return false, "incomplete chain: server sent only the leaf certificate, no intermediate CA", "", "", "", true
 		}
 	}
 
@@ -159,7 +173,7 @@ func verifyTrustStore(certs []*x509.Certificate, hostname string, caBundlePath s
 		parent := certs[i+1]
 		if err := child.CheckSignatureFrom(parent); err != nil {
 			return false, fmt.Sprintf("signature verification failed at depth %d: %s did not sign %s",
-				i, parent.Subject.CommonName, child.Subject.CommonName), "", "", ""
+				i, parent.Subject.CommonName, child.Subject.CommonName), "", "", "", false
 		}
 	}
 
@@ -171,17 +185,10 @@ func verifyTrustStore(certs []*x509.Certificate, hostname string, caBundlePath s
 		var err error
 		roots, err = loadCABundle(caBundlePath)
 		if err != nil {
-			return false, fmt.Sprintf("failed to load CA bundle %q: %v", caBundlePath, err), "", "", ""
+			return false, fmt.Sprintf("failed to load CA bundle %q: %v", caBundlePath, err), "", "", "", false
 		}
 	} else {
-		// Use the system trust store. Explicitly load the root pool so Go uses
-		// its own chain builder instead of the macOS platform verifier (which
-		// can fetch intermediates via AIA and use cached certs).
-		var err error
-		roots, err = x509.SystemCertPool()
-		if err != nil {
-			roots = x509.NewCertPool()
-		}
+		roots = loadSystemRootPool()
 	}
 
 	intermediates := x509.NewCertPool()
@@ -195,21 +202,97 @@ func verifyTrustStore(certs []*x509.Certificate, hostname string, caBundlePath s
 	}
 	chains, err := certs[0].Verify(opts)
 	if err != nil {
-		return false, err.Error(), "", "", ""
+		return false, err.Error(), "", "", "", false
 	}
 
-	// Extract the trusted root from the verified chain.
-	// The root is the last cert in the first verified chain.
+	// Enforce wire-completeness across all OSes: on macOS and Windows, the OS
+	// platform verifier can synthesize missing higher-level intermediates via AIA
+	// fetching or cached intermediates even when len(certs) >= 2. Require at least
+	// one verified chain whose non-root intermediates were all presented by the server.
+	wireChain, missingIntermediate := selectWireCompleteChain(chains, certs)
+	if wireChain == nil && missingIntermediate != "" {
+		return false, fmt.Sprintf(
+			"incomplete chain: server omitted intermediate CA %q (resolved only via OS cache/AIA; strict TLS clients will fail)",
+			missingIntermediate,
+		), "", "", "", true
+	}
+
+	// Enforce strict RFC 6125 SAN-only hostname verification on ALL OSes.
+	// On Windows, Go's SystemCertPool delegates chain verification to Windows
+	// CryptoAPI (CertVerifyCertificateChainPolicy), which silently allows falling
+	// back to Subject CommonName when a certificate has no SAN extension.
+	// Explicitly running VerifyHostname ensures Windows rejects missing-SAN /
+	// CN-only certs identically to macOS, Linux, AIX, and modern browsers.
+	if hostname != "" {
+		if err := certs[0].VerifyHostname(hostname); err != nil {
+			return false, err.Error(), "", "", "", false
+		}
+	} else if len(certs[0].DNSNames) == 0 && len(certs[0].IPAddresses) == 0 {
+		return false, "x509: leaf certificate has no Subject Alternative Names (SANs)", "", "", "", false
+	}
+
+	// Extract the trusted root from the verified wire-complete chain.
 	var rootName, rootSerial, rootFP string
-	if len(chains) > 0 && len(chains[0]) > 0 {
-		root := chains[0][len(chains[0])-1]
+	if len(wireChain) > 0 {
+		root := wireChain[len(wireChain)-1]
 		rootName = root.Subject.CommonName
+		if rootName == "" {
+			rootName = root.Subject.String()
+		}
 		rootSerial = fmt.Sprintf("%X", root.SerialNumber)
 		hash := sha256.Sum256(root.Raw)
 		rootFP = fmt.Sprintf("%X", hash)
 	}
 
-	return true, "", rootName, rootSerial, rootFP
+	return true, "", rootName, rootSerial, rootFP, false
+}
+
+// selectWireCompleteChain returns the first verified chain in chains whose
+// non-root intermediate certificates (chain[1 : len(chain)-1]) were all actually
+// presented by the server in presentedCerts[1:]. If no verified chain is
+// wire-complete, it returns (nil, omittedIntermediateName).
+func selectWireCompleteChain(chains [][]*x509.Certificate, presentedCerts []*x509.Certificate) ([]*x509.Certificate, string) {
+	if len(chains) == 0 {
+		return nil, ""
+	}
+
+	wireIntermediates := presentedCerts[1:]
+	firstMissing := ""
+
+	for _, ch := range chains {
+		if len(ch) <= 2 {
+			// Either [Leaf] (directly trusted) or [Leaf, Root] (no intermediates).
+			return ch, ""
+		}
+
+		allOnWire := true
+		for _, inter := range ch[1 : len(ch)-1] {
+			if !certInSlice(inter, wireIntermediates) {
+				allOnWire = false
+				if firstMissing == "" {
+					firstMissing = inter.Subject.CommonName
+					if firstMissing == "" {
+						firstMissing = inter.Subject.String()
+					}
+				}
+				break
+			}
+		}
+		if allOnWire {
+			return ch, ""
+		}
+	}
+
+	return nil, firstMissing
+}
+
+func certInSlice(target *x509.Certificate, list []*x509.Certificate) bool {
+	for _, c := range list {
+		if target.Equal(c) {
+			return true
+		}
+	}
+	return false
 }
 
 func gradeChain(a ChainAnalysis) HealthStatus {

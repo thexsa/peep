@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -86,12 +87,12 @@ var (
 
 var portscanCmd = &cobra.Command{
 	Use:   "portscan <host>",
-	Short: "TCP port scan — check which ports are listening",
+	Short: "TCP port scan -- check which ports are listening",
 	Long: `Perform a TCP connect scan to discover open/listening ports.
 
 This works like nmap -sT (TCP connect scan) and does NOT require root
 or elevated privileges. It completes a full TCP handshake to detect
-open ports — accurate and cross-platform.
+open ports -- accurate and cross-platform.
 
 Normal mode scans the top 50 common TLS/service ports.
 Full mode (--full) scans all 65,535 ports.
@@ -133,16 +134,7 @@ func runPortscan(cmd *cobra.Command, args []string) error {
 
 	ui.ResetSass()
 
-	target := args[0]
-	target = strings.TrimPrefix(target, "https://")
-	target = strings.TrimPrefix(target, "http://")
-	target = strings.TrimSuffix(target, "/")
-
-	// Strip port if provided (portscan scans many ports, not a single one)
-	host, _, err := net.SplitHostPort(target)
-	if err != nil {
-		host = target
-	}
+	host := parseHostOnly(args[0])
 
 	timeout := time.Duration(flagTimeout) * time.Second
 
@@ -160,7 +152,7 @@ func runPortscan(cmd *cobra.Command, args []string) error {
 
 	totalPorts := len(ports)
 
-	// Determine concurrency
+	// Determine concurrency (clamped against OS RLIMIT_NOFILE on Unix)
 	maxWorkers := 50
 	scanTimeout := timeout
 	if flagPortscanFull {
@@ -169,8 +161,10 @@ func runPortscan(cmd *cobra.Command, args []string) error {
 			scanTimeout = 2 * time.Second
 		}
 	}
+	maxWorkers = tuneWorkerConcurrency(maxWorkers)
 
 	startTime := time.Now()
+	showProgress := !flagJSON && ui.IsInteractiveTTY()
 
 	if !flagJSON {
 		fmt.Println(renderPortScanBanner(host, totalPorts))
@@ -191,10 +185,21 @@ func runPortscan(cmd *cobra.Command, args []string) error {
 		go func() {
 			defer wg.Done()
 			for port := range portCh {
-				addr := fmt.Sprintf("%s:%d", host, port)
-				probeStart := time.Now()
-				conn, dialErr := net.DialTimeout("tcp", addr, scanTimeout)
-				latency := time.Since(probeStart)
+				addr := net.JoinHostPort(host, strconv.Itoa(port))
+				var (
+					conn    net.Conn
+					dialErr error
+					latency time.Duration
+				)
+				for attempt := 0; attempt < 3; attempt++ {
+					probeStart := time.Now()
+					conn, dialErr = net.DialTimeout("tcp", addr, scanTimeout)
+					latency = time.Since(probeStart)
+					if !isTransientSocketError(dialErr) {
+						break
+					}
+					time.Sleep(time.Duration(attempt+1) * 25 * time.Millisecond)
+				}
 				if dialErr == nil {
 					conn.Close()
 					svc := serviceNames[port]
@@ -213,7 +218,7 @@ func runPortscan(cmd *cobra.Command, args []string) error {
 
 				mu.Lock()
 				scanned++
-				if !flagJSON {
+				if showProgress {
 					fmt.Printf("\r  Scanning ports... %d/%d", scanned, totalPorts)
 				}
 				mu.Unlock()
@@ -227,7 +232,7 @@ func runPortscan(cmd *cobra.Command, args []string) error {
 	close(portCh)
 	wg.Wait()
 
-	if !flagJSON {
+	if showProgress {
 		fmt.Printf("\r%s\n", strings.Repeat(" ", 50)) // clear progress line
 	}
 
