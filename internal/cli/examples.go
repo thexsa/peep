@@ -227,12 +227,16 @@ func updateExamples() exampleSet {
 				command:     "peep update --check",
 			},
 			{
-				description: "Update to the latest version:",
+				description: "Update to the latest version (offers user-scope PATH setup on Windows if needed):",
 				command:     "peep update",
 			},
 			{
 				description: "Force update even if already on the latest version:",
 				command:     "peep update --force",
+			},
+			{
+				description: "Run Windows user-scope PATH setup (install.ps1 — no admin required):",
+				command:     "peep update --install",
 			},
 		},
 	}

@@ -130,7 +130,7 @@ chmod +x peep-darwin-arm64
 sudo mv peep-darwin-arm64 /usr/local/bin/peep
 ```
 
-**Windows (manual):** Download `peep-windows-amd64.exe` (or `peep-windows-arm64.exe`), rename to `peep.exe`, and place in a directory in your user `%PATH%` (such as `%LOCALAPPDATA%\Programs\peep`).
+**Windows (standalone `.exe`):** If you download `peep-windows-amd64.exe` (or `peep-windows-arm64.exe`) directly — or upgrade from an older standalone binary (`v0.7.0` and earlier) — `peep` automatically detects on first run and during `peep update` if `peep.exe` is not yet on your user `PATH`, explains what `install.ps1` does, and offers to set up `%LOCALAPPDATA%\Programs\peep\peep.exe` + user `PATH` for you (no Administrator rights required). You can also trigger this anytime with `peep update --install`.
 
 ### Build from Source
 
@@ -245,13 +245,14 @@ peep checks for updates automatically (once every 24 hours) and notifies you aft
   💡 Update available: v1.3.0 → v1.4.0 (run `peep update` to upgrade)
 ```
 
-Update with a single command — peep auto-detects whether you installed via Homebrew or GitHub binary:
+Update with a single command — peep auto-detects whether you installed via Homebrew or GitHub binary (and on Windows, offers user-scope `peep.exe` + `PATH` setup if you're still running a standalone `peep-windows-*.exe`):
 ```bash
 peep update              # Update to latest
 peep update --check      # Just check, don't install
+peep update --install    # Windows: run user-scope PATH setup (no admin required)
 ```
 
-Disable automatic checks: set `PEEP_NO_UPDATE_CHECK=1` in your environment.
+Disable automatic checks: set `PEEP_NO_UPDATE_CHECK=1` in your environment (or `PEEP_NO_INSTALL_PROMPT=1` on Windows to skip the interactive PATH setup offer).
 
 ---
 
@@ -364,6 +365,7 @@ Most flags also have a fun themed alias. Use whichever speaks to you.
 | `peep update` | Update peep to the latest version (alias: `peep upgrade`) |
 | `peep update --check` | Check for updates without installing |
 | `peep update --force` | Force update even if already on latest version |
+| `peep update --install` | Run Windows user-scope `peep.exe` + `PATH` setup (`install.ps1`, no admin required) |
 | `peep version` | Show version, install method, and platform |
 | `peep completion --install` | Install shell tab-completion (zsh, bash, fish, PowerShell) |
 

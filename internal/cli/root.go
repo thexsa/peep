@@ -19,20 +19,21 @@ import (
 
 var (
 	// Flags
-	flagProto      string
-	flagTimeout    int
-	flagJSON       bool
-	flagPlainText  bool
-	flagInsecure   bool
-	flagVerbose    bool   // -v/--verbose/--stare: PEM certs + raw x509
-	flagDetails    bool   // -d/--details: cert detail cards
-	flagExplain    bool   // -e/--explain/--whytho
-	flagSave       string // -s/--save/--polaroid: "all" or index number
-	flagSaveSet    bool   // tracks whether --save was explicitly set
-	flagRaw        bool   // -r/--raw: raw x509 text output
-	flagInternalCA bool   // --internal-ca: adjust grading for internal/private CA certs
-	flagCABundle   string // --ca-bundle: path to custom CA bundle (replaces system trust store)
-	flagConnCheck  bool   // -c/--connect: TCP connectivity check only
+	flagProto       string
+	flagTimeout     int
+	flagJSON        bool
+	flagPlainText   bool
+	flagInsecure    bool
+	flagVerbose     bool   // -v/--verbose/--stare: PEM certs + raw x509
+	flagDetails     bool   // -d/--details: cert detail cards
+	flagExplain     bool   // -e/--explain/--whytho
+	flagSave        string // -s/--save/--polaroid: "all" or index number
+	flagSaveSet     bool   // tracks whether --save was explicitly set
+	flagRaw         bool   // -r/--raw: raw x509 text output
+	flagInternalCA  bool   // --internal-ca: adjust grading for internal/private CA certs
+	flagCABundle    string // --ca-bundle: path to custom CA bundle (replaces system trust store)
+	flagConnCheck   bool   // -c/--connect: TCP connectivity check only
+	executedCmdName string // tracks active Cobra subcommand for post-run hooks
 )
 
 var rootCmd = &cobra.Command{
@@ -75,6 +76,7 @@ Use --examples on any command for detailed usage examples with jq queries:
   peep docs --examples          Show examples for the docs browser`,
 	Args: cobra.MaximumNArgs(1),
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
+		executedCmdName = cmd.Name()
 		if flagPlainText {
 			ui.EnablePlainText()
 		}
@@ -171,6 +173,13 @@ func Execute() error {
 	// Print update notification after all output (skip in JSON mode)
 	if !flagJSON {
 		printUpdateNotification(updateCh)
+		switch executedCmdName {
+		case "whatsnew", "completion", "update":
+			// Skip: whatsnew is internal, completion prints shell scripts, and
+			// update handles the Windows setup prompt directly inside runUpdate.
+		default:
+			maybeOfferFirstRunWindowsInstall()
+		}
 	}
 
 	return err

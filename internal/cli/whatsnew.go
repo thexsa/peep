@@ -13,6 +13,10 @@ import (
 // Add a new entry for each release. The key is the version WITHOUT the "v" prefix.
 // The blurb should be brief — detailed changelog is in CHANGELOG.md and on GitHub.
 var releaseNotes = map[string]string{
+	"0.8.1": `* Guided Windows user-scope setup on first run & peep update (no admin required)
+* Installs peep.exe to %LOCALAPPDATA%\Programs\peep + user PATH so 'peep <host>' just works
+* Added 'peep update --install' + offline/GPO local fallback & local SHA-256 binary reuse
+* Includes v0.8.0 deterministic missing-SAN, wire-chain, IPv6, and strict ASCII parity`,
 	"0.8.0": `* Deterministic missing-SAN & CN-only detection across all OSes (including Windows)
 * Wire-complete intermediate chain verification — defeats silent macOS/Windows AIA caching
 * Protocol-aware cipher & TLS version enumeration across all 11 protocols in peep scan

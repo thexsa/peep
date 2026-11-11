@@ -1,9 +1,14 @@
 package cli
 
 import (
+	"bytes"
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/thexsa/peep/internal/ui"
 )
 
 func TestParseTargetAndHostOnly(t *testing.T) {
@@ -202,8 +207,184 @@ func TestRemovedFlagAliasesAbsentAndBaseFlagsIntact(t *testing.T) {
 }
 
 func TestReleaseNotes080Present(t *testing.T) {
-	notes, ok := releaseNotes["0.8.0"]
-	if !ok || notes == "" {
-		t.Fatalf("expected releaseNotes[\"0.8.0\"] to be populated for peep update whatsnew output")
+	for _, ver := range []string{"0.8.0", "0.8.1"} {
+		notes, ok := releaseNotes[ver]
+		if !ok || notes == "" {
+			t.Fatalf("expected releaseNotes[%q] to be populated for peep update whatsnew output", ver)
+		}
 	}
+}
+
+func TestWindowsInstallPromptFlowAndStrictASCII(t *testing.T) {
+	if f := updateCmd.Flags().Lookup("install"); f == nil {
+		t.Fatal("expected `peep update --install` flag to be registered")
+	}
+
+	execPath := `C:\Users\alice\Downloads\peep-windows-amd64.exe`
+	installDir := `C:\Users\alice\AppData\Local\Programs\peep`
+
+	t.Run("accepting prompt runs installer and prints guidance", func(t *testing.T) {
+		var out bytes.Buffer
+		ranInstall := false
+		dismissed := false
+
+		offerWindowsInstallSetupIO(
+			strings.NewReader("y\n"),
+			&out,
+			execPath,
+			installDir,
+			"0.8.1",
+			true,
+			false,
+			false,
+			func(targetVersion, sourceExecPath string, allowReuseSourceExe bool, w io.Writer) (string, error) {
+				ranInstall = true
+				if targetVersion != "0.8.1" || sourceExecPath != execPath || !allowReuseSourceExe {
+					t.Errorf("unexpected runInstall args: ver=%q src=%q reuse=%v", targetVersion, sourceExecPath, allowReuseSourceExe)
+				}
+				return installDir, nil
+			},
+			func() error {
+				dismissed = true
+				return nil
+			},
+		)
+
+		if !ranInstall {
+			t.Fatal("expected accepting [Y/n] prompt to invoke runInstall")
+		}
+		if dismissed {
+			t.Fatal("did not expect dismissFirstRun to be called on accept")
+		}
+		rendered := out.String()
+		for _, want := range []string{
+			"peep-windows-amd64.exe",
+			`C:\Users\alice\Downloads`,
+			"install.ps1",
+			"no Administrator rights needed",
+			"peep <endpoint>",
+			"[OK] Windows user setup complete!",
+			"peep example.com",
+		} {
+			if !strings.Contains(rendered, want) {
+				t.Errorf("expected prompt output to contain %q, got:\n%s", want, rendered)
+			}
+		}
+	})
+
+	t.Run("declining on first run records dismissal while update decline does not", func(t *testing.T) {
+		var out bytes.Buffer
+		ranInstall := false
+		dismissedCount := 0
+
+		offerWindowsInstallSetupIO(
+			strings.NewReader("n\n"),
+			&out,
+			execPath,
+			installDir,
+			"0.8.1",
+			true,
+			false, // first-run
+			false,
+			func(targetVersion, sourceExecPath string, allowReuseSourceExe bool, w io.Writer) (string, error) {
+				ranInstall = true
+				return installDir, nil
+			},
+			func() error {
+				dismissedCount++
+				return nil
+			},
+		)
+		if ranInstall || dismissedCount != 1 {
+			t.Fatalf("expected first-run decline to dismiss once without installing (ran=%v dismissed=%d)", ranInstall, dismissedCount)
+		}
+
+		// During `peep update` (fromUpdate=true), declining should NOT call dismissFirstRun.
+		offerWindowsInstallSetupIO(
+			strings.NewReader("n\n"),
+			&out,
+			execPath,
+			installDir,
+			"0.8.1",
+			true,
+			true, // fromUpdate
+			false,
+			func(targetVersion, sourceExecPath string, allowReuseSourceExe bool, w io.Writer) (string, error) {
+				ranInstall = true
+				return installDir, nil
+			},
+			func() error {
+				dismissedCount++
+				return nil
+			},
+		)
+		if ranInstall || dismissedCount != 1 {
+			t.Fatalf("expected update decline not to increment dismissFirstRun (ran=%v dismissed=%d)", ranInstall, dismissedCount)
+		}
+	})
+
+	t.Run("EOF on stdin neither installs nor records dismissal", func(t *testing.T) {
+		var out bytes.Buffer
+		ranInstall := false
+		dismissed := false
+
+		offerWindowsInstallSetupIO(
+			strings.NewReader(""), // immediate EOF
+			&out,
+			execPath,
+			installDir,
+			"0.8.1",
+			true,
+			false,
+			false,
+			func(targetVersion, sourceExecPath string, allowReuseSourceExe bool, w io.Writer) (string, error) {
+				ranInstall = true
+				return installDir, nil
+			},
+			func() error {
+				dismissed = true
+				return nil
+			},
+		)
+		if ranInstall || dismissed {
+			t.Fatalf("expected EOF on stdin to neither install nor dismiss (ran=%v dismissed=%v)", ranInstall, dismissed)
+		}
+	})
+
+	t.Run("plain-text mode emits strictly 7-bit ASCII and install.ps1 stays pure ASCII", func(t *testing.T) {
+		ui.EnablePlainText()
+		var out bytes.Buffer
+		offerWindowsInstallSetupIO(
+			strings.NewReader("\n"), // pressing Enter accepts default Yes
+			&out,
+			execPath,
+			installDir,
+			"0.8.1",
+			true,
+			true,
+			false,
+			func(targetVersion, sourceExecPath string, allowReuseSourceExe bool, w io.Writer) (string, error) {
+				_, _ = io.WriteString(w, "[OK] SHA-256 checksum verified\n")
+				return installDir, nil
+			},
+			nil,
+		)
+
+		raw := out.Bytes()
+		for i, b := range raw {
+			if b > 127 || b == 0x1b {
+				t.Fatalf("non-ASCII or ANSI byte 0x%02x at offset %d in plain-text output:\n%s", b, i, string(raw))
+			}
+		}
+
+		ps1Bytes, err := os.ReadFile(filepath.Join("..", "..", "install.ps1"))
+		if err != nil {
+			t.Fatalf("failed to read install.ps1: %v", err)
+		}
+		for i, b := range ps1Bytes {
+			if b > 127 {
+				t.Fatalf("non-ASCII byte 0x%02x at offset %d in install.ps1", b, i)
+			}
+		}
+	})
 }

@@ -4,18 +4,20 @@
 #   irm https://raw.githubusercontent.com/thexsa/peep/main/install.ps1 | iex
 #
 # Optional environment overrides before running:
-#   $env:PEEP_INSTALL_DIR = "$HOME\bin"       # Custom user-writable directory
-#   $env:PEEP_VERSION     = "v0.8.0"          # Pin a specific release tag
-#   $env:PEEP_NO_PATH     = "1"               # Skip modifying user PATH
+#   $env:PEEP_INSTALL_DIR   = "$HOME\bin"     # Custom user-writable directory
+#   $env:PEEP_VERSION       = "v0.8.1"        # Pin a specific release tag
+#   $env:PEEP_NO_PATH       = "1"             # Skip modifying user PATH
+#   $env:PEEP_SOURCE_BINARY = "C:\...\peep"   # Reuse local binary if SHA-256 matches
 #
 # Or run locally with flags:
-#   .\install.ps1 -InstallDir "$HOME\bin" -Version "v0.8.0" -NoModifyPath
+#   .\install.ps1 -InstallDir "$HOME\bin" -Version "v0.8.1" -NoModifyPath
 
 function Install-Peep {
     [CmdletBinding()]
     param(
-        [string]$InstallDir = $env:PEEP_INSTALL_DIR,
-        [string]$Version    = $env:PEEP_VERSION,
+        [string]$InstallDir   = $env:PEEP_INSTALL_DIR,
+        [string]$Version      = $env:PEEP_VERSION,
+        [string]$SourceBinary = $env:PEEP_SOURCE_BINARY,
         [switch]$NoModifyPath
     )
 
@@ -137,18 +139,27 @@ function Install-Peep {
     $TmpDir  = Join-Path $TmpRoot ("peep-install-" + [Guid]::NewGuid().ToString('N'))
     New-Item -ItemType Directory -Path $TmpDir -Force | Out-Null
 
+    function Get-PeepSha256([string]$FilePath) {
+        if (Get-Command Get-FileHash -ErrorAction SilentlyContinue) {
+            return (Get-FileHash -LiteralPath $FilePath -Algorithm SHA256).Hash.ToLowerInvariant()
+        }
+        $sha256 = [System.Security.Cryptography.SHA256]::Create()
+        try {
+            $stream = [System.IO.File]::OpenRead($FilePath)
+            try {
+                $hashBytes = $sha256.ComputeHash($stream)
+                return ([BitConverter]::ToString($hashBytes) -replace '-', '').ToLowerInvariant()
+            } finally {
+                $stream.Dispose()
+            }
+        } finally {
+            $sha256.Dispose()
+        }
+    }
+
     try {
         $TmpBin       = Join-Path $TmpDir $BinaryName
         $TmpChecksums = Join-Path $TmpDir 'checksums-sha256.txt'
-
-        Write-Host "Downloading $BinaryName..."
-        try {
-            Invoke-WebRequest -Uri $DownloadUrl -OutFile $TmpBin @iwrParams
-        } catch {
-            Write-Fail "Failed to download binary from $DownloadUrl"
-            Write-Info $_.Exception.Message
-            return
-        }
 
         Write-Host "Downloading SHA-256 checksums..."
         try {
@@ -179,25 +190,33 @@ function Install-Peep {
             return
         }
 
-        # Compute actual SHA-256 hash (Get-FileHash with .NET cryptography fallback for constrained policies).
-        $ActualHash = $null
-        if (Get-Command Get-FileHash -ErrorAction SilentlyContinue) {
-            $ActualHash = (Get-FileHash -LiteralPath $TmpBin -Algorithm SHA256).Hash.ToLowerInvariant()
-        } else {
-            $sha256 = [System.Security.Cryptography.SHA256]::Create()
+        # Reuse an already-downloaded local binary when its SHA-256 matches the release checksum.
+        $UsedLocalBinary = $false
+        if (-not [string]::IsNullOrWhiteSpace($SourceBinary) -and (Test-Path -LiteralPath $SourceBinary)) {
             try {
-                $stream = [System.IO.File]::OpenRead($TmpBin)
-                try {
-                    $hashBytes = $sha256.ComputeHash($stream)
-                    $ActualHash = ([BitConverter]::ToString($hashBytes) -replace '-', '').ToLowerInvariant()
-                } finally {
-                    $stream.Dispose()
+                $localHash = Get-PeepSha256 $SourceBinary
+                if ($localHash -eq $ExpectedHash) {
+                    Copy-Item -LiteralPath $SourceBinary -Destination $TmpBin -Force
+                    $UsedLocalBinary = $true
+                    Write-Info "Using verified local binary ($SourceBinary)"
                 }
-            } finally {
-                $sha256.Dispose()
+            } catch {
+                # Fall through to downloading fresh from GitHub Releases.
             }
         }
 
+        if (-not $UsedLocalBinary) {
+            Write-Host "Downloading $BinaryName..."
+            try {
+                Invoke-WebRequest -Uri $DownloadUrl -OutFile $TmpBin @iwrParams
+            } catch {
+                Write-Fail "Failed to download binary from $DownloadUrl"
+                Write-Info $_.Exception.Message
+                return
+            }
+        }
+
+        $ActualHash = Get-PeepSha256 $TmpBin
         if ($ActualHash -ne $ExpectedHash) {
             Write-Fail "SHA-256 checksum mismatch for $BinaryName!"
             Write-Info "Expected: $ExpectedHash"

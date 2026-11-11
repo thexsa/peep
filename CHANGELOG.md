@@ -2,6 +2,15 @@
 
 All notable changes to peep will be documented in this file.
 
+## [0.8.1] — 2026-11-10
+
+### Added
+- **Guided Windows Non-Admin `peep.exe` + User `PATH` Setup** — on Windows, when running a standalone binary (such as `peep-windows-amd64.exe` after upgrading from `v0.7.0` or older, or from a fresh download) where `peep.exe` is not yet on `PATH`, `peep` explains what `install.ps1` does and offers to set up `%LOCALAPPDATA%\Programs\peep\peep.exe` + user-level `PATH` automatically (zero Administrator rights required):
+  - Offered once on **first interactive run** (dismissing saves state in `~/.peep/windows_install.json` so normal commands never re-prompt).
+  - Offered during **`peep update`** going forward whenever `peep.exe` is not yet installed on `PATH` (including when the current folder is read-only without admin privileges).
+  - Triggerable anytime via **`peep update --install`** (with `PEEP_NO_INSTALL_PROMPT=1` opt-out for scripted environments).
+- **Local Binary SHA-256 Reuse & Offline/GPO Fallback** — `install.ps1` now accepts `-SourceBinary` / `$env:PEEP_SOURCE_BINARY` to verify and reuse an already-downloaded local binary against `checksums-sha256.txt` without downloading twice, with an automatic pure-Go user-scope copy + `HKCU\Environment\Path` fallback when offline or restricted by Group Policy.
+
 ## [0.8.0] — 2026-11-10
 
 ### Added

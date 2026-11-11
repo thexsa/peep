@@ -175,6 +175,12 @@ func IsInteractiveTTY() bool {
 	return term.IsTerminal(int(os.Stdout.Fd()))
 }
 
+// CanPromptInteractively returns true when both stdin and stdout are attached
+// to interactive terminals (independent of --plain-text).
+func CanPromptInteractively() bool {
+	return term.IsTerminal(int(os.Stdin.Fd())) && term.IsTerminal(int(os.Stdout.Fd()))
+}
+
 var plainTextReplacer = strings.NewReplacer(
 	// Semantic verdict & status symbols
 	"🌐", "[Browser]",
